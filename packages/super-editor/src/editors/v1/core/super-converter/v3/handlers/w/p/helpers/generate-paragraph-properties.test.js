@@ -434,3 +434,36 @@ describe('generateParagraphProperties', () => {
     generateParagraphProperties({ node });
   });
 });
+
+describe('generateParagraphProperties style ids from localized Word builds', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    wPPrNodeTranslator.decode.mockReturnValue({ type: 'element', name: 'w:pPr', elements: [] });
+  });
+
+  // pt-BR Word keeps built-in style names but translates ids (heading 1 → Ttulo1).
+  const converter = {
+    linkedStyles: [
+      { id: 'Ttulo1', definition: { attrs: { name: 'heading 1' } } },
+      { id: 'Normal', definition: { attrs: { name: 'Normal' } } },
+    ],
+  };
+  const exportedStyleId = (styleId) => {
+    generateParagraphProperties({
+      node: { type: 'paragraph', attrs: { paragraphProperties: { styleId } } },
+      converter,
+    });
+    return wPPrNodeTranslator.decode.mock.calls[0][0].node.attrs.paragraphProperties.styleId;
+  };
+
+  it('writes the localized document id for a default English heading id', () => {
+    expect(exportedStyleId('Heading1')).toBe('Ttulo1');
+  });
+
+  it('keeps ids the document defines, and unknown ids, unchanged', () => {
+    expect(exportedStyleId('Normal')).toBe('Normal');
+    vi.clearAllMocks();
+    wPPrNodeTranslator.decode.mockReturnValue({ type: 'element', name: 'w:pPr', elements: [] });
+    expect(exportedStyleId('SomethingElse')).toBe('SomethingElse');
+  });
+});

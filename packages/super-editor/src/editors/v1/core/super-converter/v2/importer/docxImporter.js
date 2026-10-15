@@ -768,8 +768,19 @@ export function addDefaultStylesIfMissing(styles) {
   const updatedStyles = carbonCopy(styles);
   const { elements } = updatedStyles.elements[0];
 
+  // Localized Word builds keep the built-in style *name* but translate the id
+  // (e.g. pt-BR writes styleId "Ttulo" / "Ttulo1" for "Title" / "heading 1").
+  // Match on the name too, or the injected default becomes a second "Title"
+  // and Word renders the document's paragraphs with it. Names compare
+  // case-insensitively, as Word does.
+  const styleName = (el) =>
+    el?.elements?.find((child) => child.name === 'w:name')?.attributes?.['w:val']?.toLowerCase();
+  const existingNames = new Set(elements.map(styleName).filter(Boolean));
+
   Object.keys(DEFAULT_LINKED_STYLES).forEach((styleId) => {
-    const existsOnDoc = elements.some((el) => el.attributes?.['w:styleId'] === styleId);
+    const existsOnDoc =
+      elements.some((el) => el.attributes?.['w:styleId'] === styleId) ||
+      existingNames.has(styleName(DEFAULT_LINKED_STYLES[styleId]));
     if (!existsOnDoc) {
       const missingStyle = DEFAULT_LINKED_STYLES[styleId];
       updatedStyles.elements[0].elements.push(missingStyle);

@@ -2,6 +2,7 @@ import { carbonCopy } from '@core/utilities/carbonCopy.js';
 import { translator as wPPrNodeTranslator } from '../../pPr/pPr-translator.js';
 import { createParagraphSplitInsertionElement, isParagraphSplitTrackFormatMark } from '../../../helpers.js';
 import { resolveExportWordId } from '@converter/v3/handlers/helpers/resolve-export-word-id.js';
+import { findStyleById } from '@converter/docx-helpers/find-style-by-id.js';
 
 function resolveExportPartPath(params = {}) {
   if (typeof params.currentPartPath === 'string' && params.currentPartPath.length > 0) return params.currentPartPath;
@@ -125,6 +126,14 @@ export function generateParagraphProperties(params) {
   const { attrs = {} } = node;
 
   const paragraphProperties = carbonCopy(attrs.paragraphProperties || {});
+
+  // A default English style id (e.g. 'Heading1' from a heading command) in a
+  // document from a localized Word build points at that build's own id for the
+  // same built-in style ('Ttulo1' in pt-BR); otherwise Word finds no such style.
+  if (paragraphProperties.styleId) {
+    const style = findStyleById(params?.converter?.linkedStyles, paragraphProperties.styleId);
+    if (style?.id) paragraphProperties.styleId = style.id;
+  }
 
   // Final-doc export flattens tracked changes to the accepted result (like the
   // ins/del translators, which strip their wrappers when params.isFinalDoc). A

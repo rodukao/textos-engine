@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { Extension } from '@core/Extension.js';
-import { applyLinkedStyleToTransaction, generateLinkedStyleString } from './helpers.js';
+import { applyLinkedStyleToTransaction, findStyleById, generateLinkedStyleString } from './helpers.js';
 import { createLinkedStylesPlugin, LinkedStylesPluginKey } from './plugin.js';
 import { findParentNodeClosestToPos } from '@core/helpers';
 import { getResolvedParagraphProperties } from '@extensions/paragraph/resolvedPropertiesCache.js';
@@ -78,8 +78,9 @@ export const LinkedStyles = Extension.create({
         }
         const paragraphProps = getResolvedParagraphProperties(node);
         const currentStyleId = paragraphProps.styleId;
+        const targetStyleId = findStyleById(this.editor.converter?.linkedStyles, style.id)?.id ?? style.id;
 
-        if (currentStyleId === style.id) {
+        if (currentStyleId === targetStyleId) {
           return applyLinkedStyleToTransaction(tr, this.editor, { id: null });
         }
         return applyLinkedStyleToTransaction(tr, this.editor, style);
@@ -99,7 +100,7 @@ export const LinkedStyles = Extension.create({
         const pluginState = LinkedStylesPluginKey.getState(state);
         if (!pluginState) return false;
 
-        const style = pluginState.styles?.find((s) => s.id === styleId);
+        const style = findStyleById(pluginState.styles, styleId);
         if (!style) return false;
 
         return applyLinkedStyleToTransaction(tr, this.editor, style);
@@ -132,7 +133,7 @@ export const LinkedStyles = Extension.create({
        */
       getStyleById: (styleId) => {
         const styles = this.editor.helpers[this.name].getStyles();
-        return styles.find((s) => s.id === styleId);
+        return findStyleById(styles, styleId);
       },
 
       /**
@@ -147,7 +148,7 @@ export const LinkedStyles = Extension.create({
        */
       getLinkedStyleString: (styleId) => {
         const styles = this.editor.helpers.linkedStyles.getStyles();
-        const style = styles.find((s) => s.id === styleId);
+        const style = findStyleById(styles, styleId);
         if (!style) return '';
         return generateLinkedStyleString(style);
       },

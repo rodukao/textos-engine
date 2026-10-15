@@ -58,6 +58,52 @@ describe('addDefaultStylesIfMissing', () => {
     const foundStyle = result.elements[0].elements.find((element) => element.attributes?.['w:styleId'] === styleId);
     expect(foundStyle).toEqual(DEFAULT_LINKED_STYLES[styleId]);
   });
+
+  describe('documents from localized Word builds', () => {
+    // pt-BR Word keeps the built-in style names but translates the ids.
+    const localizedStyle = (styleId, name) => ({
+      type: 'element',
+      name: 'w:style',
+      attributes: { 'w:type': 'paragraph', 'w:styleId': styleId },
+      elements: [{ type: 'element', name: 'w:name', attributes: { 'w:val': name } }],
+    });
+    const localizedStyles = {
+      ...styles,
+      elements: [
+        {
+          ...styles.elements[0],
+          elements: [
+            localizedStyle('Ttulo', 'Title'),
+            localizedStyle('Ttulo1', 'heading 1'),
+            localizedStyle('Hiperlink', 'HYPERLINK'),
+          ],
+        },
+      ],
+    };
+    const ids = (result) => result.elements[0].elements.map((el) => el.attributes?.['w:styleId']);
+    const names = (result) =>
+      result.elements[0].elements.map((el) =>
+        el.elements?.find((c) => c.name === 'w:name')?.attributes?.['w:val'].toLowerCase(),
+      );
+
+    it('does not add a second style with a built-in name the document already defines', () => {
+      const result = addDefaultStylesIfMissing(localizedStyles);
+      expect(ids(result)).not.toContain('Title');
+      expect(ids(result)).not.toContain('Heading1');
+      const counts = names(result).reduce((acc, n) => ({ ...acc, [n]: (acc[n] ?? 0) + 1 }), {});
+      expect(counts['title']).toBe(1);
+      expect(counts['heading 1']).toBe(1);
+    });
+
+    it('matches style names case-insensitively, as Word does', () => {
+      expect(ids(addDefaultStylesIfMissing(localizedStyles))).not.toContain('Hyperlink');
+    });
+
+    it('still adds defaults the document does not define under any id', () => {
+      const result = addDefaultStylesIfMissing(localizedStyles);
+      expect(ids(result)).toEqual(expect.arrayContaining(['Subtitle', 'Heading2', 'Heading3']));
+    });
+  });
 });
 
 describe('createDocumentJson', () => {

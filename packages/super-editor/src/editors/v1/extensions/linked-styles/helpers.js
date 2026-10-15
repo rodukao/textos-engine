@@ -6,6 +6,9 @@ import { findParentNodeClosestToPos } from '../../core/helpers/findParentNodeClo
 import { kebabCase } from '@superdoc/common';
 import { getUnderlineCssString } from './index.js';
 import { twipsToLines, twipsToPixels, halfPointToPixels } from '@converter/helpers.js';
+import { findStyleById } from '@converter/docx-helpers/find-style-by-id.js';
+
+export { findStyleById };
 
 const FORMATTING_MARK_NAMES = new Set([
   'textStyle',
@@ -28,7 +31,7 @@ const FORMATTING_MARK_NAMES = new Set([
  * const { linkedStyle, basedOnStyle } = getLinkedStyle('Heading1', styles);
  */
 export const getLinkedStyle = (styleId, styles = []) => {
-  const linkedStyle = styles.find((style) => style.id === styleId);
+  const linkedStyle = findStyleById(styles, styleId);
   const basedOn = linkedStyle?.definition?.attrs?.basedOn;
   const basedOnStyle = styles.find((style) => style.id === basedOn);
   return { linkedStyle, basedOnStyle };
@@ -350,6 +353,13 @@ const applyCharacterStyleMarkToRange = (tr, textStyleType, from, to, styleId) =>
  */
 export const applyLinkedStyleToTransaction = (tr, editor, style) => {
   if (!style) return false;
+
+  // Callers often pass only an id (e.g. headings: { id: 'Heading1' }); apply the
+  // document's own style when it defines that built-in style under a localized id.
+  if (style.id) {
+    const resolved = findStyleById(editor.converter?.linkedStyles, style.id);
+    if (resolved && resolved.id !== style.id) style = { ...style, id: resolved.id };
+  }
 
   let selection = tr.selection;
   const state = editor.state;
