@@ -1,4 +1,4 @@
-import { translateChildNodes } from '@converter/v2/exporter/helpers/translateChildNodes';
+import { translateChildNodes, HOST_PARAGRAPH } from '@converter/v2/exporter/helpers/translateChildNodes';
 import { generateRandomSigned32BitIntStrId } from '@helpers/generateDocxRandomId';
 import { wrapTextInRun } from '@converter/exporter';
 import { parseInlineStyles } from './parse-inline-styles';
@@ -12,19 +12,14 @@ export function translateShapeContainer(params) {
   const { node } = params;
 
   if (node?.attrs?.drawingContent) {
-    const run = translateDrawingMLTextbox(params);
-    if (run) {
-      return {
-        name: 'w:p',
-        elements: [run],
-      };
-    }
-    // w:txbxContent not found in blob — replay the original drawing unchanged
-    // to preserve the shape rather than silently dropping it.
-    return {
-      name: 'w:p',
-      elements: [wrapTextInRun(node.attrs.drawingContent)],
-    };
+    const run = translateDrawingMLTextbox(params) || wrapTextInRun(node.attrs.drawingContent);
+    // If w:txbxContent was not found in the blob, the fallback above replays the
+    // original drawing unchanged to preserve the shape rather than dropping it.
+    const paragraph = { name: 'w:p', elements: [run] };
+    // Hoisted out of a paragraph with text on import: translateChildNodes moves the
+    // run back into that paragraph instead of keeping this wrapper <w:p>.
+    if (node.attrs.hostParagraph) paragraph[HOST_PARAGRAPH] = node.attrs.hostParagraph;
+    return paragraph;
   }
   const elements = translateChildNodes(params);
   const shapeAttributes = {

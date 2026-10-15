@@ -40,6 +40,8 @@ function cloneParagraphAttrsForFragment(attrs, { keepSectPr = false } = {}) {
   return nextAttrs;
 }
 
+const HOISTED_DRAWING_TYPE = 'shapeContainer';
+
 function hasSectionBreakAttrs(attrs) {
   return Boolean(attrs?.paragraphProperties?.sectPr);
 }
@@ -93,6 +95,24 @@ function normalizeParagraphChildren(children, schema, textblockAttrs) {
       }),
     };
   });
+
+  // A shape (e.g. a floating caption text box) that shares its <w:p> with text is
+  // hoisted out as a sibling block. Record which neighbouring fragment of the same
+  // source paragraph hosted it, so export can put the drawing run back inside that
+  // paragraph instead of emitting an extra empty <w:p> (which Word renders as a
+  // blank line and pushes all following text down).
+  if (!isSingleBlockResult) {
+    normalized.forEach((node, index) => {
+      if (node?.type !== HOISTED_DRAWING_TYPE) return;
+      const host =
+        normalized[index + 1]?.type === 'paragraph'
+          ? 'next'
+          : normalized[index - 1]?.type === 'paragraph'
+            ? 'previous'
+            : null;
+      if (host) normalized[index] = { ...node, attrs: { ...(node.attrs || {}), hostParagraph: host } };
+    });
+  }
 
   if (shouldAttachWrapperParagraph) {
     const lastNode = normalized[lastNodeIndex];

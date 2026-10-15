@@ -461,3 +461,48 @@ describe('legacy-handle-paragraph-node', () => {
     });
   });
 });
+
+describe('legacy-handle-paragraph-node hoisted shapes', () => {
+  // A floating caption text box often shares its <w:p> with body text. The shape is
+  // hoisted out as a sibling block; hostParagraph tells export where to put it back.
+  const schemaEditor = {
+    schema: {
+      nodes: {
+        shapeContainer: { isInline: false, spec: { group: 'block' } },
+        text: { isInline: true, spec: { group: 'inline' } },
+      },
+    },
+  };
+  const shape = () => ({ type: 'shapeContainer', attrs: { isTextBox: true }, content: [] });
+  // One <w:r> per translated child, like a real paragraph holding a drawing run and text runs.
+  const paragraphWith = (content) =>
+    makeParams({
+      _mockContent: content,
+      nodes: [{ name: 'w:p', attributes: {}, elements: content.map(() => ({ name: 'w:r', elements: [] })) }],
+      editor: schemaEditor,
+    });
+
+  beforeEach(() => {
+    mergeTextNodes.mockImplementation((content) => content);
+  });
+  const text = (value) => ({ type: 'text', text: value });
+
+  it('points a shape at the start of a paragraph to the following text fragment', () => {
+    const out = handleParagraphNode(paragraphWith([shape(), text('Body')]));
+    expect(out.map((n) => n.type)).toEqual(['shapeContainer', 'paragraph']);
+    expect(out[0].attrs.hostParagraph).toBe('next');
+  });
+
+  it('points a shape at the end of a paragraph to the preceding text fragment', () => {
+    const out = handleParagraphNode(paragraphWith([text('Body'), shape()]));
+    expect(out.map((n) => n.type)).toEqual(['paragraph', 'shapeContainer']);
+    expect(out[1].attrs.hostParagraph).toBe('previous');
+  });
+
+  it('leaves hostParagraph unset when the shape is the only content of its paragraph', () => {
+    const out = handleParagraphNode(paragraphWith([shape()]));
+    expect(out).toHaveLength(1);
+    expect(out[0].attrs.hostParagraph).toBeUndefined();
+    expect(out[0].attrs.wrapperParagraph).toBeTruthy();
+  });
+});

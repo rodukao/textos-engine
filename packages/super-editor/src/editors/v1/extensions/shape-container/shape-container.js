@@ -82,6 +82,14 @@ export const ShapeContainer = Node.create({
         rendered: false,
       },
 
+      // 'next' | 'previous' when this shape was hoisted out of a <w:p> that also held
+      // text: names the neighbouring paragraph it belongs to, so export can put the
+      // drawing back inside it instead of writing an extra empty paragraph.
+      hostParagraph: {
+        default: null,
+        rendered: false,
+      },
+
       anchorData: {
         rendered: false,
       },
