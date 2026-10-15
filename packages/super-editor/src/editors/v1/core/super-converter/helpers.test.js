@@ -11,6 +11,8 @@ import {
   detectImageType,
   eighthPointsToPixels,
   resolveShadingFillColor,
+  emuToPixels,
+  pixelsToEmu,
 } from './helpers.js';
 import { getFallbackImageNameFromDataUri } from './helpers/mediaHelpers.js';
 
@@ -542,6 +544,32 @@ describe('detectImageType', () => {
 
   it('returns null for invalid base64 string', () => {
     expect(detectImageType('not-valid-base64!!!')).toBe(null);
+  });
+});
+
+describe('emuToPixels / pixelsToEmu', () => {
+  // 914400 EMU = 1 in = 96 px, so 1 px = 9525 EMU.
+  it('converts whole-pixel EMU values exactly', () => {
+    expect(emuToPixels(914400)).toBe(96);
+    expect(pixelsToEmu(96)).toBe(914400);
+  });
+
+  it('keeps sub-pixel precision instead of rounding', () => {
+    expect(emuToPixels(2412365)).toBeCloseTo(253.2667, 4);
+    expect(emuToPixels(635)).toBeGreaterThan(0);
+  });
+
+  it('round-trips any integer EMU value unchanged', () => {
+    // Text box width, anchor offset and a tiny auto-fit height from a real Word document.
+    for (const emu of [2412365, 240030, 635, 1, 9524, 9526, 114300, 6858000]) {
+      expect(pixelsToEmu(emuToPixels(emu))).toBe(emu);
+    }
+  });
+
+  it('accepts numeric strings and passes nullish through', () => {
+    expect(emuToPixels('9525')).toBe(1);
+    expect(emuToPixels(undefined)).toBeUndefined();
+    expect(emuToPixels(null)).toBeUndefined();
   });
 });
 

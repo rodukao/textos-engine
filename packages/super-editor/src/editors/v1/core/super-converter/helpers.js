@@ -148,8 +148,11 @@ function halfPointToPoints(halfPoints) {
 function emuToPixels(emu) {
   if (emu == null) return;
   if (typeof emu === 'string') emu = parseFloat(emu);
-  const pixels = (emu * PIXELS_PER_INCH) / 914400;
-  return Math.round(pixels);
+  // No rounding: EMU (914400 per inch) is far finer than a pixel, and rounding here
+  // loses precision on every open/save (e.g. 2412365 EMU → 253 px → 2409825 EMU),
+  // which changes text-box line wrapping and image sizes when Word reopens the file.
+  // pixelsToEmu(emuToPixels(x)) returns exactly x for any integer EMU.
+  return (emu * PIXELS_PER_INCH) / 914400;
 }
 
 function pixelsToEmu(px) {
