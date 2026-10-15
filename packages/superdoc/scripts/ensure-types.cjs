@@ -15,6 +15,8 @@ const distRoot = path.resolve(__dirname, '..', 'dist');
 const packageRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const binExtension = process.platform === 'win32' ? '.cmd' : '';
+// No Windows, o Node (>= 20) só executa .cmd com shell: true (CVE-2024-27980).
+const spawnShell = process.platform === 'win32';
 const resolvePackageBin = (name) => path.join(packageRoot, 'node_modules', '.bin', `${name}${binExtension}`);
 
 // SD-2842: vite-plugin-dts skips hand-written `.d.ts` files in its include
@@ -101,7 +103,7 @@ const SHARED_COMMON_DTS_TARGETS = typeSurface.sharedCommonDtsTargets;
   );
   let tscResult;
   try {
-    tscResult = _spawnSync(tscBin, ['-p', tempTsconfig], { stdio: 'inherit' });
+    tscResult = _spawnSync(tscBin, ['-p', tempTsconfig], { stdio: 'inherit', shell: spawnShell });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -149,7 +151,7 @@ const SHARED_COMMON_DTS_TARGETS = typeSurface.sharedCommonDtsTargets;
   );
   let tscResult;
   try {
-    tscResult = _spawnSync(tscBin, ['-p', tempTsconfig], { stdio: 'inherit' });
+    tscResult = _spawnSync(tscBin, ['-p', tempTsconfig], { stdio: 'inherit', shell: spawnShell });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
