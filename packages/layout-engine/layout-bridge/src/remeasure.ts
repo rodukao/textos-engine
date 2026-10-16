@@ -25,7 +25,7 @@ import {
   type MeasureAtomicText,
   type MinimalAtomicRun,
 } from '@superdoc/common/atomic-run-size';
-import { resolveWordLineHeight } from '@superdoc/measuring-dom';
+import { measureUnhintedTextWidth, resolveWordLineHeight } from '@superdoc/measuring-dom';
 
 /**
  * Type definition for paragraph block attributes that include indentation and tab stops.
@@ -647,9 +647,32 @@ function measureRunSliceWidth(run: Run, fromChar: number, toChar: number): numbe
     const size = textRun?.fontSize ?? 16;
     return Math.max(1, text.length * (size * 0.6));
   }
-  context.font = fontString(run);
-  const metrics = context.measureText(text);
-  return metrics.width;
+  // Design advances, like the DOM measurer (see measureUnhintedTextWidth).
+  return cachedTextWidth(context, text, fontString(run));
+}
+
+/** Widths of short texts (single characters and pairs) repeat constantly while breaking lines. */
+const textWidthCache = new Map<string, number>();
+const TEXT_WIDTH_CACHE_SIZE = 20000;
+
+function cachedTextWidth(context: CanvasRenderingContext2D, text: string, font: string): number {
+  const key = `${font}|${text}`;
+  const cached = textWidthCache.get(key);
+  if (cached !== undefined) return cached;
+  const width = measureUnhintedTextWidth(context, text, font);
+  if (textWidthCache.size >= TEXT_WIDTH_CACHE_SIZE) textWidthCache.clear();
+  textWidthCache.set(key, width);
+  return width;
+}
+
+/**
+ * Advance of character `index` of the run, including the kerning between it and the previous
+ * character of the same run, so per-character sums match the width of the whole text (Word kerns
+ * when w:kern is set; the DOM measurer and the browser measure whole runs with kerning).
+ */
+function measureRunCharAdvance(run: Run, index: number): number {
+  if (index <= 0 || !getCtx()) return measureRunSliceWidth(run, index, index + 1);
+  return measureRunSliceWidth(run, index - 1, index + 1) - measureRunSliceWidth(run, index - 1, index);
 }
 
 /**
@@ -1548,7 +1571,7 @@ export function remeasureParagraph(
           widthAtLastBreak = width;
           continue;
         }
-        const w = measureRunSliceWidth(run, c, c + 1);
+        const w = measureRunCharAdvance(run, c);
         if (width + w > effectiveMaxWidth - WIDTH_FUDGE_PX && width > 0) {
           const canKeepBorderlineUnbreakableText = lastBreakRun < 0 && width + w <= effectiveMaxWidth + WIDTH_FUDGE_PX;
           if (canKeepBorderlineUnbreakableText) {

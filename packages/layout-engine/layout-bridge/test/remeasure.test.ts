@@ -1208,8 +1208,13 @@ describe('remeasureParagraph', () => {
       const widthMap = new Map<string, number>([
         ['Terms', 48.9],
         ['Term', 39.125],
-        ['Ter', 30],
-        ['Te', 20],
+        // Prefixes and character pairs agree with the single-character widths (no kerning): the
+        // remeasurer takes each character's advance from the pair it forms with the previous one.
+        ['Ter', 24.3],
+        ['Te', 18.5],
+        ['er', 14.3],
+        ['rm', 20.625],
+        ['ms', 23.7234375],
         ['T', 10],
         ['e', 8.5],
         ['r', 5.8],

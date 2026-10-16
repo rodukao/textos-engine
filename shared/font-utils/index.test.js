@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'bun:test';
-import { FONT_FAMILY_FALLBACKS, DEFAULT_GENERIC_FALLBACK, mapWordFamilyFallback, toCssFontFamily } from './index.js';
+import {
+  FONT_FAMILY_FALLBACKS,
+  DEFAULT_GENERIC_FALLBACK,
+  mapWordFamilyFallback,
+  measureUnhintedTextWidth,
+  unhintedTextCorrection,
+  toCssFontFamily,
+} from './index.js';
 
 describe('FONT_FAMILY_FALLBACKS', () => {
   it('should be frozen and contain expected mappings', () => {
@@ -398,5 +405,45 @@ describe('toCssFontFamily', () => {
     it('should preserve semicolons inside quoted font names', () => {
       expect(toCssFontFamily('"Foo;Bar";Arial')).toBe('"Foo;Bar", Arial, sans-serif');
     });
+  });
+});
+
+describe('measureUnhintedTextWidth', () => {
+  // Fake canvas whose glyphs are hinted wider at small sizes (+1px per character below 100px).
+  const makeCtx = () => ({
+    font: '',
+    measureText(text) {
+      const size = Number.parseFloat(/(\d*\.?\d+)px/.exec(this.font)[1]);
+      return { width: text.length * (size * 0.5 + (size < 100 ? 1 : 0)) };
+    },
+  });
+
+  it('measures at a large size and scales down to the design width', () => {
+    expect(measureUnhintedTextWidth(makeCtx(), 'abcd', 'italic bold 16px Cambria')).toBeCloseTo(4 * 8, 6);
+  });
+
+  it('keeps fractional sizes and the rest of the font string', () => {
+    const ctx = makeCtx();
+    expect(measureUnhintedTextWidth(ctx, 'ab', '14.6667px "Cambria", serif')).toBeCloseTo(2 * 7.33335, 4);
+    expect(ctx.font).toBe('14.6667px "Cambria", serif');
+  });
+});
+
+describe('measureUnhintedTextWidth with a stub context', () => {
+  it('uses the plain measure when widths ignore the font size', () => {
+    const stub = { font: '', measureText: (text) => ({ width: text.length * 10 }) };
+    expect(measureUnhintedTextWidth(stub, 'abc', '16px Arial')).toBe(30);
+  });
+});
+
+describe('unhintedTextCorrection', () => {
+  it('is 0 for fonts drawn at their design advances', () => {
+    const linear = {
+      font: '',
+      measureText(text) {
+        return { width: text.length * 0.5 * Number.parseFloat(/(\d*\.?\d+)px/.exec(this.font)[1]) };
+      },
+    };
+    expect(unhintedTextCorrection(linear, 'abc', '16px Times New Roman')).toBe(0);
   });
 });

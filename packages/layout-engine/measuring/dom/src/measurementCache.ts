@@ -1,4 +1,5 @@
 // Simple LRU cache for measured text widths
+import { measureUnhintedTextWidth } from '@superdoc/font-utils';
 
 type CacheEntry = {
   width: number;
@@ -88,10 +89,9 @@ export function getMeasuredTextWidth(
   }
 
   try {
-    ctx.font = font;
-    const metrics = ctx.measureText(text);
     // Use advance width for line fitting; bounding-box overhangs inflate width and cause premature wraps.
-    const baseWidth = metrics.width;
+    // Design advances (no small-size hinting), as Word lays text out; the painter draws to match.
+    const baseWidth = measureUnhintedTextWidth(ctx, text, font);
     const extra = letterSpacing ? Math.max(0, text.length - 1) * letterSpacing : 0;
     const width = baseWidth + extra;
 

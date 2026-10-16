@@ -79,6 +79,7 @@ import { resolveListTextStartPx, type MinimalMarker } from '@superdoc/common/lis
 import { getAtomicRunLayoutSize, type MeasureAtomicText } from '@superdoc/common/atomic-run-size';
 import { calculateRotatedBounds, normalizeRotation } from '@superdoc/geometry-utils';
 import { toCssFontFamily } from '@superdoc/font-utils';
+export { measureUnhintedTextWidth } from '@superdoc/font-utils';
 import { DEFAULT_FONT_MEASURE_CONTEXT, type FaceKey, type FontMeasureContext } from '@superdoc/font-system';
 export { installNodeCanvasPolyfill } from './setup.js';
 import { clearMeasurementCache, getMeasuredTextWidth, setCacheSize } from './measurementCache.js';

@@ -295,3 +295,135 @@ export function toCssFontFamily(fontName, options = {}) {
 
   return [trimmed, ...fallbackParts].join(', ');
 }
+
+/** Size characters are measured at to get the font's design advances, free of small-size hinting. */
+const UNHINTED_REFERENCE_SIZE_PX = 1000;
+const FONT_SIZE_PATTERN = /(\d*\.?\d+)px/;
+
+/**
+ * Width of text from the font's design advances, which is what Word lays out with.
+ *
+ * At small sizes browsers may use hinted glyph advances: Chromium on Windows at 100% scale draws
+ * Cambria 12pt about 1.8% wider than its design widths, so lines would break earlier than in Word.
+ * Hinting rounds each glyph's advance on its own, so the text is measured at its size as usual and
+ * each character's difference (design minus hinted advance, measured once per font) is added; the
+ * result matches measuring at a large size and scaling down, kerning included, at a fraction of
+ * the cost.
+ *
+ * @param {CanvasRenderingContext2D} ctx - canvas context; its font is left set to `font`
+ * @param {string} text
+ * @param {string} font - CSS font shorthand, e.g. "italic bold 16px Cambria"
+ * @returns {number} width in pixels at the font's size
+ */
+export function measureUnhintedTextWidth(ctx, text, font) {
+  const correction = unhintedTextCorrection(ctx, text, font);
+  ctx.font = font;
+  return ctx.measureText(text).width + correction;
+}
+
+/**
+ * Design width minus the browser's (hinted) width of `text`, in pixels: 0 where the browser
+ * already uses design advances. Painters add it as letter spacing so drawn text matches the layout.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {string} text
+ * @param {string} font - CSS font shorthand
+ * @returns {number}
+ */
+export function unhintedTextCorrection(ctx, text, font) {
+  const deltas = characterDeltasFor(ctx, font);
+  if (!deltas) return 0;
+  let correction = 0;
+  let missing = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.codePointAt(i);
+    if (code > 0xffff) i += 1;
+    const delta = deltas.get(code);
+    if (delta === undefined) (missing ??= new Set()).add(code);
+    else correction += delta;
+  }
+  if (missing) {
+    // Changing the canvas font is the expensive part: measure all new characters in one go.
+    const codes = [...missing];
+    for (const [index, delta] of measureCharacterDeltas(ctx, codes, font).deltas.entries()) {
+      deltas.set(codes[index], delta);
+    }
+    for (let i = 0; i < text.length; i += 1) {
+      const code = text.codePointAt(i);
+      if (code > 0xffff) i += 1;
+      if (missing.has(code)) correction += deltas.get(code);
+    }
+  }
+  return correction;
+}
+
+/**
+ * Per font: design minus hinted advance of each character (by code point) seen so far, or null for
+ * fonts the browser draws at their design advances anyway.
+ */
+const deltasByFont = new Map();
+const MAX_FONTS = 200;
+/** Fonts whose hinted widths stay within this fraction of the design widths are left alone. */
+const NEGLIGIBLE_HINTING = 0.001;
+/** Hinting moves widths by a few percent at most; beyond this the context ignores the size (a stub). */
+const IMPLAUSIBLE_HINTING = 0.25;
+/**
+ * Frequent letters: enough to tell whether a font is hinted at a size. Measuring a glyph for the
+ * first time in a face/size is the costly part, so the probe stays short.
+ */
+const PROBE_CODES = Array.from('aeimnorst', (character) => character.codePointAt(0));
+
+function characterDeltasFor(ctx, font) {
+  const known = deltasByFont.get(font);
+  if (known !== undefined) return known;
+  const match = FONT_SIZE_PATTERN.exec(font);
+  const size = match ? Number.parseFloat(match[1]) : 0;
+  let deltas = null;
+  if (size > 0 && size < UNHINTED_REFERENCE_SIZE_PX && typeof ctx === 'object' && ctx !== null) {
+    const { deltas: probeDeltas, hinted } = measureCharacterDeltas(ctx, PROBE_CODES, font);
+    const drift = hinted > 0 ? Math.abs(probeDeltas.reduce((sum, delta) => sum + delta, 0)) / hinted : Infinity;
+    if (drift > NEGLIGIBLE_HINTING && drift < IMPLAUSIBLE_HINTING) {
+      deltas = new Map(PROBE_CODES.map((code, index) => [code, probeDeltas[index]]));
+    }
+  }
+  if (deltasByFont.size >= MAX_FONTS) deltasByFont.clear();
+  deltasByFont.set(font, deltas);
+  return deltas;
+}
+
+/**
+ * Per face (the font at the reference size, e.g. "bold 1000px Cambria"): design advance of each
+ * character at the reference size. Shared by every size of the face, so the reference size is
+ * measured once per face rather than once per size.
+ */
+const designAdvancesByFace = new Map();
+
+function referenceFont(font) {
+  return font.replace(FONT_SIZE_PATTERN, `${UNHINTED_REFERENCE_SIZE_PX}px`);
+}
+
+/** Design minus hinted advance of each character at `font`, and their total hinted width. */
+function measureCharacterDeltas(ctx, codes, font) {
+  const size = Number.parseFloat(FONT_SIZE_PATTERN.exec(font)[1]);
+  const face = referenceFont(font);
+  let advances = designAdvancesByFace.get(face);
+  if (!advances) {
+    if (designAdvancesByFace.size >= MAX_FONTS) designAdvancesByFace.clear();
+    advances = new Map();
+    designAdvancesByFace.set(face, advances);
+  }
+  const unknown = codes.filter((code) => !advances.has(code));
+  if (unknown.length > 0) {
+    ctx.font = face;
+    for (const code of unknown) advances.set(code, ctx.measureText(String.fromCodePoint(code)).width);
+  }
+  ctx.font = font;
+  let hinted = 0;
+  const deltas = codes.map((code) => {
+    const drawn = ctx.measureText(String.fromCodePoint(code)).width;
+    hinted += drawn;
+    const delta = (advances.get(code) * size) / UNHINTED_REFERENCE_SIZE_PX - drawn;
+    return Number.isFinite(delta) ? delta : 0;
+  });
+  return { deltas, hinted };
+}

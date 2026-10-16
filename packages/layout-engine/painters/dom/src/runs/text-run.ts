@@ -15,6 +15,7 @@ import { applyRunDataAttributes } from './hash.js';
 import { applyLinkAttributes, applyLinkDataset, buildLinkRenderData, enhanceAccessibility } from './links.js';
 import { setTextContentWithFormattingSpaceMarks } from './formatting-marks.js';
 import { allowFontSynthesis } from './font-synthesis.js';
+import { unhintedLetterSpacing } from './unhinted-advance.js';
 import {
   normalizeRtlDateTokenForWordParity,
   resolveRunDirectionAttribute,
@@ -274,6 +275,16 @@ export const renderTextRun = (
 
   // Pass isLink flag to skip applying inline color/decoration styles for links
   applyRunStyles(elem as HTMLElement, run, isActiveLink, renderContext.resolvePhysical);
+  // Draw at the design advances the layout measured (see unhinted-advance.ts). Transformed text and
+  // formatting marks change the drawn characters, so they keep the browser's own advances.
+  if (typeof effectiveText === 'string' && !run.textTransform && !renderContext.showFormattingMarks) {
+    const style = (elem as HTMLElement).style;
+    const font = `${style.fontStyle === 'italic' ? 'italic ' : ''}${style.fontWeight === 'bold' ? 'bold ' : ''}${style.fontSize} ${style.fontFamily}`;
+    const correction = unhintedLetterSpacing(renderContext.doc, effectiveText, font);
+    if (Math.abs(correction) > 0.0005) {
+      style.letterSpacing = `${(run.letterSpacing ?? 0) + correction}px`;
+    }
+  }
   const dirAttr = resolveRunDirectionAttribute({
     runText: run.text,
     effectiveText,
