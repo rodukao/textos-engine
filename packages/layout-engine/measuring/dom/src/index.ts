@@ -12,8 +12,7 @@
  * Typography Approximations (v0.1.0):
  * - ascent ≈ fontSize * 0.8 (baseline to top)
  * - descent ≈ fontSize * 0.2 (baseline to bottom)
- * - lineHeight = fontSize * 1.15 (Word 2007+ "single" line spacing)
- * - empty paragraphs use fontSize as the base line height
+ * - lineHeight = Word's single line height for the font (see wordLineMetrics.ts) × spacing multiple
  *
  * These are documented heuristics; we can swap in precise font metrics later
  * if needed via libraries like opentype.js.
@@ -84,6 +83,7 @@ import { DEFAULT_FONT_MEASURE_CONTEXT, type FaceKey, type FontMeasureContext } f
 export { installNodeCanvasPolyfill } from './setup.js';
 import { clearMeasurementCache, getMeasuredTextWidth, setCacheSize } from './measurementCache.js';
 import { getFontMetrics, clearFontMetricsCache, type FontInfo } from './fontMetricsCache.js';
+import { DEFAULT_SINGLE_LINE_RATIO, getWordSingleLineRatio, quantizeWordLineHeight } from './wordLineMetrics.js';
 import { computeAutoFitColumnWidths } from './autofit-columns.js';
 import { buildAutoFitWorkingGridInput, type WorkingTableGridInput } from './autofit-normalize.js';
 import { computeFixedTableColumnWidths } from './fixed-table-columns.js';
@@ -392,17 +392,23 @@ function measureText(
  */
 
 /**
- * Word 2007+ default line spacing multiplier for "single" line spacing.
+ * Word's single line height for a font, in pixels.
  *
- * Microsoft Word changed its line spacing algorithm in Word 2007 to use 1.15× font size
- * as the baseline for "single" line spacing, rather than just using ascent + descent.
- * This provides more breathing room and matches the industry standard for readability.
- *
- * For example, 12pt (16px) font: 16 × 1.15 = 18.4px line height.
- *
- * Reference: Word 2007+ line spacing behavior
+ * Uses the font named in the document (see wordLineMetrics.ts); for fonts outside the table, the
+ * browser's font bounding box (usWinAscent + usWinDescent in Chromium on Windows), and only then
+ * the 1.15 × size approximation.
  */
-const WORD_SINGLE_LINE_SPACING_MULTIPLIER = 1.15;
+function singleLineHeight(fontSize: number, fontInfo?: FontInfo): number {
+  const ratio = getWordSingleLineRatio(fontInfo?.metricsFamily) ?? getWordSingleLineRatio(fontInfo?.fontFamily);
+  if (ratio !== undefined) return ratio * fontSize;
+  if (fontInfo && isValidFontSize(fontInfo.fontSize) && fontInfo.fontFamily?.trim()) {
+    const metrics = getFontMetrics(getCanvasContext(), fontInfo, measurementConfig.mode, measurementConfig.fonts);
+    if (metrics.fontBoundingHeight && fontInfo.fontSize > 0) {
+      return (metrics.fontBoundingHeight / fontInfo.fontSize) * fontSize;
+    }
+  }
+  return DEFAULT_SINGLE_LINE_RATIO * fontSize;
+}
 
 /**
  * Calculate typography metrics for a given font size.
@@ -420,13 +426,8 @@ const WORD_SINGLE_LINE_SPACING_MULTIPLIER = 1.15;
  * - Browser doesn't support actualBoundingBox* metrics (legacy browsers)
  *
  * **Line Height Calculation:**
- * Uses Word 2007+'s default "single" line spacing of fontSize × 1.15 as the base.
- * This base is then modified by paragraph spacing rules (lineRule: auto/exact/atLeast).
- * A minimum line height clamp is intentionally NOT enforced to match Word's behavior
- * for small font sizes and empty paragraphs.
- *
- * The 1.15 multiplier provides consistent spacing that matches Word's behavior and
- * accounts for the line gap that Canvas TextMetrics doesn't expose directly.
+ * Starts from Word's single line height for the font (see {@link singleLineHeight}), then
+ * applies the paragraph spacing rule (lineRule: auto/exact/atLeast) as Word does.
  *
  * @param fontSize - The font size in pixels
  * @param spacing - Optional paragraph spacing configuration (lineRule, line value)
@@ -436,11 +437,11 @@ const WORD_SINGLE_LINE_SPACING_MULTIPLIER = 1.15;
  * @example
  * // Basic usage with 16px font
  * const metrics = calculateTypographyMetrics(16);
- * // Returns: { ascent: ~12.8, descent: ~3.2, lineHeight: 18.4 }
+ * // Returns: { ascent: ~12.8, descent: ~3.2, lineHeight: 18.4 } // unknown font: 16 × 1.15
  *
  * @example
  * // With 1.5 line spacing multiplier
- * const metrics = calculateTypographyMetrics(16, { line: 1.5, lineRule: 'auto' });
+ * const metrics = calculateTypographyMetrics(16, { line: 1.5, lineUnit: 'multiplier', lineRule: 'auto' });
  * // Returns: { ascent: ~12.8, descent: ~3.2, lineHeight: 27.6 } // 16 × 1.15 × 1.5
  *
  * @example
@@ -478,7 +479,7 @@ function calculateTypographyMetrics(
     descent = roundValue(resolvedFontSize * 0.2);
   }
 
-  const lineHeight = resolveLineHeight(spacing, fontSize, ascent + descent);
+  const lineHeight = resolveLineHeight(spacing, fontSize, singleLineHeight(fontSize, fontInfo));
 
   return {
     ascent,
@@ -510,9 +511,8 @@ function finalizeLineMetrics(
 /**
  * Calculates typography metrics for empty paragraphs.
  *
- * Empty paragraphs in Word use the font size as the base line height rather than
- * the standard 1.15x multiplier used for paragraphs with content. This matches
- * Word's behavior where empty paragraphs appear shorter than their populated counterparts.
+ * In Word an empty paragraph is as tall as a line of text in the paragraph mark's font
+ * (measured: Calibri 11pt is 13.5pt either way).
  *
  * @param fontSize - The font size in pixels
  * @param spacing - Optional paragraph spacing configuration (may override line height)
@@ -522,9 +522,7 @@ function finalizeLineMetrics(
  * @example
  * ```typescript
  * // Empty paragraph with 12pt font
- * calculateEmptyParagraphMetrics(16); // { ascent: 12.8, descent: 3.2, lineHeight: 16 }
- *
- * // Compare to regular text which would use 16 * 1.15 = 18.4 for lineHeight
+ * calculateEmptyParagraphMetrics(16); // { ascent: 12.8, descent: 3.2, lineHeight: 18.4 }
  * ```
  */
 function calculateEmptyParagraphMetrics(
@@ -555,9 +553,7 @@ function calculateEmptyParagraphMetrics(
     descent = roundValue(resolvedFontSize * 0.2);
   }
 
-  // Word treats empty paragraphs as a single font-sized line unless line spacing is explicitly set.
-  const maxLineHeight = Math.max(resolvedFontSize, ascent + descent);
-  const lineHeight = roundValue(resolveLineHeight(spacing, resolvedFontSize, maxLineHeight));
+  const lineHeight = resolveLineHeight(spacing, resolvedFontSize, singleLineHeight(resolvedFontSize, fontInfo));
 
   return {
     ascent,
@@ -583,6 +579,7 @@ function lineHeightFontSize(run: TextRun): number {
 function getFontInfoFromRun(run: TextRun, fontContext: FontMeasureContext): FontInfo {
   return {
     fontFamily: normalizeFontFamily(fontContext.resolvePhysical(run.fontFamily, faceOf(run))),
+    metricsFamily: run.fontFamily,
     fontSize: normalizeFontSize(lineHeightFontSize(run)),
     bold: run.bold,
     italic: run.italic,
@@ -3834,17 +3831,29 @@ const appendSegment = (
   });
 };
 
-const resolveLineHeight = (spacing: ParagraphSpacing | undefined, fontSize: number, maxHeight: number = -1): number => {
-  let computedHeight = spacing?.line ?? WORD_SINGLE_LINE_SPACING_MULTIPLIER;
-  if (spacing?.lineUnit === 'multiplier') {
-    computedHeight = computedHeight * fontSize;
-  }
-
+/**
+ * Applies the paragraph's line spacing rule to Word's single line height.
+ *
+ * - auto: `line` is a multiple of the single height (1 = single, 1.08, 1.5, 2...); multiples below
+ *   1 shrink the line, as in Word
+ * - atLeast: `line` in px, but never below the single height
+ * - exact: `line` in px
+ *
+ * auto and atLeast heights are rounded up to Word's 1/960 inch grid.
+ */
+const resolveLineHeight = (
+  spacing: ParagraphSpacing | undefined,
+  fontSize: number,
+  single: number = DEFAULT_SINGLE_LINE_RATIO * fontSize,
+): number => {
+  const line = spacing?.line;
   const lineRule = spacing?.lineRule ?? 'auto';
-  if (['atLeast', 'auto'].includes(lineRule)) {
-    return Math.max(computedHeight, maxHeight, WORD_SINGLE_LINE_SPACING_MULTIPLIER * fontSize);
+  if (line == null) return quantizeWordLineHeight(single);
+  if (spacing?.lineUnit === 'multiplier') {
+    return quantizeWordLineHeight(line * single);
   }
-  return computedHeight;
+  if (lineRule === 'exact') return line;
+  return quantizeWordLineHeight(Math.max(line, single));
 };
 
 const sanitizePositive = (value: number | undefined): number =>
@@ -3915,7 +3924,11 @@ const measureDropCap = (
 
   // Calculate height based on the number of lines the drop cap should span
   // This uses the base line height calculation from the paragraph's spacing
-  const lineHeight = resolveLineHeight(spacing, run.fontSize);
+  const lineHeight = resolveLineHeight(
+    spacing,
+    run.fontSize,
+    (getWordSingleLineRatio(run.fontFamily) ?? DEFAULT_SINGLE_LINE_RATIO) * run.fontSize,
+  );
   const height = roundValue(lineHeight * lines);
 
   return {

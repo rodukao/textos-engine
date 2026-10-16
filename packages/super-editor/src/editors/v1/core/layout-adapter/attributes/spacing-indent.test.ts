@@ -45,7 +45,7 @@ describe('normalizeParagraphSpacing', () => {
   it('converts auto line values > 10 from 240ths of a line', () => {
     const spacing = { line: 360, lineRule: 'auto' as const } as ParagraphSpacing; // 1.5x
     const result = normalizeParagraphSpacing(spacing, false);
-    expect(result?.line).toBeCloseTo(1.725, 5);
+    expect(result?.line).toBeCloseTo(1.5, 5);
     expect(result?.lineRule).toBe('auto');
   });
 
@@ -83,7 +83,7 @@ describe('normalizeParagraphSpacing', () => {
   it('returns undefined for empty or invalid inputs', () => {
     expect(normalizeParagraphSpacing(undefined, false)).toBeUndefined();
     expect(normalizeParagraphSpacing(null as never, false)).toBeUndefined();
-    expect(normalizeParagraphSpacing({} as ParagraphSpacing, false)).toEqual({ line: 1.15, lineUnit: 'multiplier' });
+    expect(normalizeParagraphSpacing({} as ParagraphSpacing, false)).toEqual({ line: 1, lineUnit: 'multiplier' });
   });
 
   it('skips non-numeric values but preserves valid ones', () => {

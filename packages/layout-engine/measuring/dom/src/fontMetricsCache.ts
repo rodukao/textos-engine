@@ -16,6 +16,8 @@
  */
 export type FontInfo = {
   fontFamily: string;
+  /** Font named in the document, before substitution; Word's line height follows it. */
+  metricsFamily?: string;
   fontSize: number;
   bold?: boolean;
   italic?: boolean;
@@ -27,6 +29,8 @@ export type FontInfo = {
 export type FontMetricsResult = {
   ascent: number;
   descent: number;
+  /** fontBoundingBoxAscent + fontBoundingBoxDescent, when the browser reports them. */
+  fontBoundingHeight?: number;
 };
 
 /**
@@ -220,6 +224,10 @@ export function getFontMetrics(
   }
 
   const result: FontMetricsResult = { ascent, descent };
+  const boundingHeight = (textMetrics.fontBoundingBoxAscent ?? 0) + (textMetrics.fontBoundingBoxDescent ?? 0);
+  if (Number.isFinite(boundingHeight) && boundingHeight > 0) {
+    result.fontBoundingHeight = boundingHeight;
+  }
 
   // Cache the result (with size limit)
   if (fontMetricsCache.size >= MAX_CACHE_SIZE) {

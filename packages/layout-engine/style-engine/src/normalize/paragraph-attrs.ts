@@ -126,7 +126,8 @@ function mapSpacing(spacing: OoxmlParagraphSpacing | undefined, isList: boolean)
       out.lineUnit = 'px';
       out.lineRule = rule;
     } else if (rule === 'auto') {
-      out.line = (spacing.line * AUTO_SPACING_DEFAULT_MULTIPLIER) / AUTO_SPACING_LINE_DEFAULT;
+      // Multiple of the font's single line height (240 = single); the measurer applies the font.
+      out.line = spacing.line / AUTO_SPACING_LINE_DEFAULT;
       out.lineUnit = 'multiplier';
       out.lineRule = 'auto';
     } else {

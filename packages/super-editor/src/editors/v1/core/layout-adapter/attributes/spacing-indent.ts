@@ -130,7 +130,8 @@ export const normalizeParagraphSpacing = (
 
 /**
  * Normalizes line spacing value based on line rule.
- * Converts OOXML line spacing values to a multiplier of font size.
+ * Converts OOXML auto line spacing to a multiple of the font's single line height, and
+ * exact/atLeast spacing to pixels.
  * @param value - OOXML line spacing value in twips
  * @param lineRule - Line rule ('auto', 'exact', 'atLeast')
  * @returns Normalized line spacing value as a multiplier, or undefined
@@ -139,13 +140,11 @@ export const normalizeLineValue = (
   value: number | undefined,
   lineRule: ParagraphSpacing['lineRule'] | undefined,
 ): { value: number; unit: 'multiplier' | 'px' } => {
-  if (value == null) return { value: AUTO_SPACING_DEFAULT_MULTIPLIER, unit: 'multiplier' };
+  if (value == null) return { value: 1, unit: 'multiplier' };
   if (lineRule == 'exact' || lineRule == 'atLeast') {
     return { value: twipsToPx(value), unit: 'px' };
   }
-  if (lineRule === 'auto') {
-    return { value: (value * AUTO_SPACING_DEFAULT_MULTIPLIER) / AUTO_SPACING_LINE_DEFAULT, unit: 'multiplier' };
-  }
+  // Multiple of the font's single line height (240 = single); the measurer applies the font.
   return { value: value / AUTO_SPACING_LINE_DEFAULT, unit: 'multiplier' };
 };
 
