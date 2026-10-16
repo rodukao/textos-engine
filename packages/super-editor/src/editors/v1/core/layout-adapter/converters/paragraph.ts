@@ -755,8 +755,23 @@ export function paragraphToFlowBlocks({
     return block;
   };
 
+  /**
+   * Floating (anchored) objects met inside the paragraph's text. They do not interrupt the text in
+   * Word, so the paragraph is not split around them: they are emitted right after it.
+   */
+  let pendingFloatingBlocks: FlowBlock[] = [];
+  const emitPendingFloatingBlocks = () => {
+    if (pendingFloatingBlocks.length === 0) return;
+    blocks.push(...pendingFloatingBlocks);
+    pendingFloatingBlocks = [];
+  };
+  const isFloatingObjectBlock = (block: FlowBlock): boolean =>
+    (block.kind === 'image' || block.kind === 'drawing') &&
+    (block as { anchor?: { isAnchored?: boolean } }).anchor?.isAnchored === true;
+
   const flushParagraph = () => {
     if (currentRuns.length === 0) {
+      emitPendingFloatingBlocks();
       return;
     }
     const runs = currentRuns;
@@ -769,6 +784,7 @@ export function paragraphToFlowBlocks({
       sourceAnchor,
     });
     partIndex += 1;
+    emitPendingFloatingBlocks();
   };
 
   const visitNode = (
@@ -855,9 +871,18 @@ export function paragraphToFlowBlocks({
             suppressedByVanish = true;
           } else if (error instanceof NotInlineNodeError && blockConverter) {
             const anchorParagraphId = nextId();
-            flushParagraph();
             const newBlocks: FlowBlock[] = [];
             const block = blockConverter(node, { ...blockOptions, blocks: newBlocks });
+            const produced = block ? [block] : newBlocks;
+            if (produced.length > 0 && produced.every(isFloatingObjectBlock)) {
+              for (const b of produced) {
+                attachAnchorParagraphId(b, anchorParagraphId);
+                attachInlineShapeGroupAlignment(b);
+                pendingFloatingBlocks.push(b);
+              }
+              return;
+            }
+            flushParagraph();
             if (block) {
               attachAnchorParagraphId(block, anchorParagraphId);
               attachInlineShapeGroupAlignment(block);
@@ -880,9 +905,20 @@ export function paragraphToFlowBlocks({
 
     if (SHAPE_CONVERTERS_REGISTRY[node.type]) {
       const anchorParagraphId = nextId();
-      flushParagraph();
       const converter = SHAPE_CONVERTERS_REGISTRY[node.type];
       const drawingBlock = converter(node, stableNextBlockId, positions);
+      if (drawingBlock && isFloatingObjectBlock(drawingBlock)) {
+        const hydratedBlock = hydrateTextboxDrawingContent(node, drawingBlock, {
+          converterContext,
+          converters,
+          nextBlockId: stableNextBlockId,
+          positions,
+        });
+        attachInlineShapeGroupAlignment(hydratedBlock);
+        pendingFloatingBlocks.push(attachAnchorParagraphId(hydratedBlock, anchorParagraphId));
+        return;
+      }
+      flushParagraph();
       if (drawingBlock) {
         const hydratedBlock = hydrateTextboxDrawingContent(node, drawingBlock, {
           converterContext,

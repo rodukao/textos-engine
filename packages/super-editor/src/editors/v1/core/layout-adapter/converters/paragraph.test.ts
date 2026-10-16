@@ -2195,7 +2195,7 @@ describe('paragraph converters', () => {
     });
 
     describe('Block nodes', () => {
-      it('should flush paragraph before image node', () => {
+      it('keeps the paragraph whole around a floating image (Word does not break the text)', () => {
         const imageNode: PMNode = {
           type: 'image',
           attrs: {
@@ -2211,10 +2211,15 @@ describe('paragraph converters', () => {
 
         const blocks = paragraphToFlowBlocks(para, nextBlockId, positions, 'Arial', 16);
 
-        expect(blocks).toHaveLength(3);
+        expect(blocks).toHaveLength(2);
         expect(blocks[0].kind).toBe('paragraph');
+        expect((blocks[0] as FlowBlock & { runs: Array<{ text?: string }> }).runs.map((r) => r.text).join('')).toBe(
+          'BeforeAfter',
+        );
         expect(blocks[1].kind).toBe('image');
-        expect(blocks[2].kind).toBe('paragraph');
+        expect((blocks[1] as FlowBlock & { attrs?: { anchorParagraphId?: string } }).attrs?.anchorParagraphId).toBe(
+          blocks[0].id,
+        );
       });
 
       it('should annotate tracked changes for image blocks', () => {
@@ -4500,11 +4505,10 @@ describe('paragraph converters', () => {
 
       const blocks = paragraphToFlowBlocks(para, nextBlockId, positions, 'Arial', 16);
 
-      // Should split into: paragraph before, image block, paragraph after
-      expect(blocks).toHaveLength(3);
+      // The text is not split around a floating image: the paragraph, then the image anchored to it
+      expect(blocks).toHaveLength(2);
       expect(blocks[0].kind).toBe('paragraph');
       expect(blocks[1].kind).toBe('image');
-      expect(blocks[2].kind).toBe('paragraph');
       const imageBlock = blocks[1] as FlowBlock & { src?: string };
       expect(imageBlock.src).toBe('image.png');
     });

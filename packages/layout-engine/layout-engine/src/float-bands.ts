@@ -106,6 +106,11 @@ export type BandLayoutInput = {
   /** Room for a line at a given height. */
   bandAt: (y: number, lineHeight: number) => LineBand;
   remeasure: (part: ParagraphBlock, width: number) => Line[];
+  /**
+   * Lay out only the text from this line's start on (a paragraph continuing on a new page);
+   * `fullWidthLines` is then ignored. Returned lines refer to the whole block.
+   */
+  startLine?: Line;
 };
 
 /**
@@ -113,12 +118,20 @@ export type BandLayoutInput = {
  * inside a non-text run), so the caller keeps the single-width layout.
  */
 export function layoutLinesInBands(input: BandLayoutInput): { lines: Line[]; bands: LineBand[] } | undefined {
-  const { block, fullWidthLines, columnWidth, bandAt } = input;
+  const { block, columnWidth, bandAt } = input;
   const lines: Line[] = [];
   const bands: LineBand[] = [];
   let y = input.startY;
   let base: RunPosition = { run: 0, char: 0 };
   let part: ParagraphBlock = block;
+  let fullWidthLines = input.fullWidthLines;
+  if (input.startLine && (input.startLine.fromRun > 0 || input.startLine.fromChar > 0)) {
+    base = { run: input.startLine.fromRun, char: input.startLine.fromChar };
+    const continuation = sliceParagraphBlock(block, base);
+    if (!continuation) return undefined;
+    part = continuation;
+    fullWidthLines = input.remeasure(part, columnWidth);
+  }
   let partLines = fullWidthLines;
   let partBand: LineBand = { width: columnWidth, offsetX: 0 };
 
@@ -126,7 +139,7 @@ export function layoutLinesInBands(input: BandLayoutInput): { lines: Line[]; ban
     const band = bandAt(y, partLines[0]?.lineHeight ?? 0);
     if (!sameBand(band, partBand)) {
       partLines =
-        isFullBand(band, columnWidth) && part === block
+        isFullBand(band, columnWidth) && (part === block || lines.length === 0)
           ? fullWidthLines
           : input.remeasure(part, isFullBand(band, columnWidth) ? columnWidth : input.measureWidth(band.width));
       partBand = band;

@@ -1,6 +1,7 @@
 import type { FloatingObjectManager } from './floating-objects';
 import type { PageState } from './paginator';
 import type {
+  Line,
   PageMargins,
   ParagraphBlock,
   ParagraphMeasure,
@@ -566,9 +567,12 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
   let paragraphContentEndY = paragraphAnchorBaseY;
   const anchorFirstLineHeight = suppressVisibleSectPrMarkerParagraph ? 0 : (measure.lines?.[0]?.lineHeight ?? 0);
 
-  const registerAnchoredDrawingsAt = (paragraphContentStartY: number) => {
-    if (!anchors?.anchoredDrawings?.length) return;
-    for (const entry of anchors.anchoredDrawings) {
+  const registerAnchoredDrawingsAt = (
+    paragraphContentStartY: number,
+    entries: NonNullable<typeof anchors>['anchoredDrawings'] = anchors?.anchoredDrawings,
+  ) => {
+    if (!anchors || !entries?.length) return;
+    for (const entry of entries) {
       if (anchors.placedAnchoredIds.has(entry.block.id)) continue;
       const state = ensurePage();
 
@@ -684,7 +688,86 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     }
   };
 
-  registerAnchoredDrawingsAt(effectiveParagraphAnchorBaseY);
+  // Word puts an anchored object on the page of its anchor: an object anchored near the end of a
+  // paragraph that continues on the next page goes to the top of that continuation. Those are
+  // placed when the paragraph reaches that page (see PHASE 2).
+  // Word also moves the anchor line itself to the next page when placing the object here would
+  // narrow the lines enough to push that line off the page: the lines before it stay at full
+  // width, the page breaks before the anchor line, and the object goes to the top of the next page.
+  const pushesAnchorLineOffPage = (entry: NonNullable<typeof anchors>['anchoredDrawings'][number]): boolean => {
+    if (!anchors || typeof remeasureParagraph !== 'function' || !canLayoutInBands(block, measure)) return false;
+    const anchor = entry.block.anchor;
+    const wrapType = entry.block.wrap?.type ?? 'None';
+    if (!anchor || (anchor.vRelativeFrom ?? 'paragraph') !== 'paragraph') return false;
+    if (wrapType === 'None' || wrapType === 'Inline' || wrapType === 'TopAndBottom') return false;
+    if (anchorLineIndex(block, lines, entry.block) === 0) return false;
+    const state = ensurePage();
+    const width = entry.measure.width ?? 0;
+    const height = entry.measure.height ?? 0;
+    const objectY = resolveAnchoredGraphicY({
+      anchor,
+      objectHeight: height,
+      contentTop: state.topMargin,
+      contentBottom: state.contentBottom,
+      pageBottomMargin: anchors.pageMargins.bottom ?? 0,
+      anchorParagraphY: effectiveParagraphAnchorBaseY,
+      firstLineHeight: anchorFirstLineHeight,
+    });
+    const objectX = resolveAnchoredGraphicX(
+      anchor,
+      state.columnIndex,
+      anchors.columns,
+      width,
+      { left: anchors.pageMargins.left, right: anchors.pageMargins.right },
+      anchors.pageWidth,
+    );
+    const wrap = entry.block.wrap;
+    const top = objectY - (wrap?.distTop ?? 0);
+    const bottom = objectY + height + (wrap?.distBottom ?? 0);
+    const left = columnX(state);
+    const onLeft = objectX + width / 2 < left + columnWidth / 2;
+    const bandAt = (y: number, lineHeight: number) => {
+      const base = floatManager.computeAvailableWidth(y, lineHeight, columnWidth, state.columnIndex, state.page.number);
+      if (!(y + lineHeight > top && y < bottom)) return base;
+      const baseLeft = left + base.offsetX;
+      const baseRight = baseLeft + base.width;
+      const textLeft = onLeft ? Math.max(baseLeft, objectX + width + (wrap?.distRight ?? 0)) : baseLeft;
+      const textRight = onLeft ? baseRight : Math.min(baseRight, objectX - (wrap?.distLeft ?? 0));
+      return { offsetX: textLeft - left, width: Math.max(1, textRight - textLeft) };
+    };
+    const withObject = layoutLinesInBands({
+      block,
+      fullWidthLines: lines,
+      startY: paragraphAnchorBaseY,
+      columnWidth,
+      measureWidth: (bandWidth) => Math.max(1, bandWidth - Math.max(indentLeft, 0) - Math.max(indentRight, 0)),
+      bandAt,
+      remeasure: (part, partWidth) => normalizeLines(remeasureParagraph(part, partWidth, 0)),
+    });
+    if (!withObject) return false;
+    const anchorLine = anchorLineIndex(block, withObject.lines, entry.block);
+    let anchorLineBottom = paragraphAnchorBaseY;
+    for (let i = 0; i <= anchorLine; i += 1) anchorLineBottom += withObject.lines[i]?.lineHeight ?? 0;
+    return anchorLineBottom > state.contentBottom;
+  };
+  const deferredAnchoredDrawings = (anchors?.anchoredDrawings ?? []).filter(
+    (entry) =>
+      !anchors?.placedAnchoredIds.has(entry.block.id) &&
+      anchorLineIndex(block, lines, entry.block) >=
+        linesThatFit(lines, ensurePage().contentBottom - paragraphAnchorBaseY),
+  );
+  /** Object whose anchor line is moved to the next page (the page breaks right before it). */
+  const breakBeforeAnchorOf = (anchors?.anchoredDrawings ?? []).find(
+    (entry) =>
+      !anchors?.placedAnchoredIds.has(entry.block.id) &&
+      !deferredAnchoredDrawings.includes(entry) &&
+      pushesAnchorLineOffPage(entry),
+  );
+  if (breakBeforeAnchorOf) deferredAnchoredDrawings.push(breakBeforeAnchorOf);
+  registerAnchoredDrawingsAt(
+    effectiveParagraphAnchorBaseY,
+    anchors?.anchoredDrawings?.filter((entry) => !deferredAnchoredDrawings.includes(entry)),
+  );
 
   const registerAnchoredTablesAt = (paragraphContentStartY: number, entries: AnchoredTable[]) => {
     if (!entries.length) return;
@@ -824,6 +907,10 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
   let didRemeasureForFloats = false;
   /** Width and offset of each line when the paragraph was laid out in bands around floats. */
   let lineBands: LineBand[] | undefined;
+  /** Page whose floats the lines were last wrapped around. */
+  let bandedPageNumber = ensurePage().page.number;
+  const firstPageNumber = bandedPageNumber;
+  let lastFragmentY: number | undefined;
 
   if (typeof remeasureParagraph === 'function') {
     const tempState = ensurePage();
@@ -1185,6 +1272,56 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
       effectiveBottom = computePreviewBottom();
     }
 
+    const breakBeforeLine = breakBeforeAnchorOf ? anchorLineIndex(block, lines, breakBeforeAnchorOf.block) : undefined;
+    if (
+      breakBeforeLine != null &&
+      fromLine > 0 &&
+      fromLine === breakBeforeLine &&
+      state.page.number === firstPageNumber
+    ) {
+      state = advanceColumn(state);
+      effectiveBottom = computePreviewBottom();
+    }
+
+    // The paragraph continues on a new page: place the objects anchored in its text there, and
+    // wrap the remaining lines around that page's floats (they were laid out against the first).
+    if (fromLine > 0 && state.page.number !== bandedPageNumber) {
+      bandedPageNumber = state.page.number;
+      const arriving = deferredAnchoredDrawings.filter(
+        (entry) => anchorLineIndex(block, lines, entry.block) >= fromLine,
+      );
+      if (arriving.length > 0) {
+        registerAnchoredDrawingsAt(state.cursorY, arriving);
+        for (const entry of arriving) deferredAnchoredDrawings.splice(deferredAnchoredDrawings.indexOf(entry), 1);
+      }
+      if (
+        typeof remeasureParagraph === 'function' &&
+        canLayoutInBands(block, measure) &&
+        floatManager.getAllFloatsForPage(state.page.number).length > 0
+      ) {
+        const continuation = layoutLinesInBands({
+          block,
+          fullWidthLines: [],
+          startLine: lines[fromLine],
+          startY: state.cursorY,
+          columnWidth,
+          measureWidth: (bandWidth) => Math.max(1, bandWidth - Math.max(indentLeft, 0) - Math.max(indentRight, 0)),
+          bandAt: (y, height) =>
+            floatManager.computeAvailableWidth(y, height, columnWidth, state.columnIndex, state.page.number),
+          remeasure: (part, width) => normalizeLines(remeasureParagraph(part, width, 0)),
+        });
+        if (continuation) {
+          lines = [...lines.slice(0, fromLine), ...continuation.lines];
+          lineBands = [
+            ...(lineBands ?? []).slice(0, fromLine),
+            ...new Array(Math.max(0, fromLine - (lineBands?.length ?? 0))).fill({ width: columnWidth, offsetX: 0 }),
+            ...continuation.bands,
+          ];
+          didRemeasureForFloats = true;
+        }
+      }
+    }
+
     // Use the narrowest width and offset if we remeasured
     let effectiveColumnWidth = columnWidth;
     let offsetX = 0;
@@ -1236,6 +1373,7 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
 
       // A fragment has one x and width: start a new one where the band around floats changes.
       if (band && !sameBand(lineBands?.[toLine], band)) break;
+      if (toLine === breakBeforeLine && state.page.number === firstPageNumber) break;
       const candidateBottom = state.cursorY + height + lineHeight + borderVertical;
       const effBot = computeEffectiveBottom(orderedDemand, nextRefs);
       if (candidateBottom > effBot) break;
@@ -1348,7 +1486,18 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     state.maxCursorY = Math.max(state.maxCursorY, state.cursorY);
     lastState = state;
     paragraphContentEndY = state.cursorY;
+    lastFragmentY = fragment.y;
     fromLine = slice.toLine;
+  }
+
+  // Objects whose anchor did not end up on a later page after all: place them where the paragraph
+  // (or its last part) starts, as before.
+  if (deferredAnchoredDrawings.length > 0) {
+    const lastPage = ensurePage().page.number;
+    registerAnchoredDrawingsAt(
+      lastPage === firstPageNumber ? effectiveParagraphAnchorBaseY : (lastFragmentY ?? effectiveParagraphAnchorBaseY),
+      deferredAnchoredDrawings,
+    );
   }
 
   if (lastState) {
@@ -1404,4 +1553,33 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     const postLayoutAnchorY = usesLineTopOnEmptyParagraph ? paragraphAnchorBaseY : paragraphContentEndY;
     registerAnchoredTablesAt(postLayoutAnchorY, postLayoutAnchoredTables);
   }
+}
+
+/**
+ * Index of the line holding an anchored object's anchor (its position in the paragraph text), or 0
+ * when that position is unknown.
+ */
+function anchorLineIndex(block: ParagraphBlock, lines: Line[], anchored: { attrs?: unknown }): number {
+  const attrs = anchored.attrs as { pmStart?: unknown } | undefined;
+  const anchorPm = typeof attrs?.pmStart === 'number' ? attrs.pmStart : undefined;
+  if (anchorPm == null) return 0;
+  let index = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const start = computeFragmentPmRange(block, lines, i, i + 1).pmStart;
+    if (start == null || start > anchorPm) break;
+    index = i;
+  }
+  return index;
+}
+
+/** How many of the lines fit in the given height (at least the first, which always goes). */
+function linesThatFit(lines: Line[], height: number): number {
+  let used = 0;
+  let count = 0;
+  for (const line of lines) {
+    used += line.lineHeight || 0;
+    if (used > height && count > 0) break;
+    count += 1;
+  }
+  return count;
 }
