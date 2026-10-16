@@ -216,6 +216,20 @@ describe('FloatingObjectManager', () => {
   });
 
   describe('computeAvailableWidth', () => {
+    it('keeps the text at the margin with only a right-side image (page margins)', () => {
+      // Word: text beside a right float spans from the left margin to the float, not from the page edge.
+      const manager = createFloatingObjectManager(mockColumns, { left: 100, right: 100 }, 800);
+      const imageBlock = createMockImageBlock({
+        anchor: { isAnchored: true, alignH: 'right' },
+        wrap: { type: 'Square', wrapText: 'bothSides', distLeft: 12, distRight: 12 },
+      });
+
+      manager.registerDrawing(imageBlock, createMockMeasure(), 100, 0, 1);
+
+      const result = manager.computeAvailableWidth(120, 20, 600, 0, 1);
+      expect(result).toEqual({ width: 600 - 200 - 12, offsetX: 0 });
+    });
+
     it('returns full width when no exclusions', () => {
       const manager = createFloatingObjectManager(mockColumns, { left: 0, right: 0 }, 600);
 

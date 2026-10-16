@@ -9,6 +9,7 @@ import type {
   TabStop,
   ParagraphIndent,
   LeaderDecoration,
+  ParagraphSpacing,
 } from '@superdoc/contracts';
 import { EMPTY_SDT_PLACEHOLDER_TEXT, Engines, isEmptySdtPlaceholderRun } from '@superdoc/contracts';
 import type { WordParagraphLayoutOutput } from '@superdoc/word-layout';
@@ -24,6 +25,7 @@ import {
   type MeasureAtomicText,
   type MinimalAtomicRun,
 } from '@superdoc/common/atomic-run-size';
+import { resolveWordLineHeight } from '@superdoc/measuring-dom';
 
 /**
  * Type definition for paragraph block attributes that include indentation and tab stops.
@@ -32,6 +34,7 @@ import {
 type ParagraphBlockAttrs = {
   indent?: { left?: number; right?: number; firstLine?: number; hanging?: number };
   tabs?: TabStop[];
+  spacing?: ParagraphSpacing;
   tabIntervalTwips?: number;
   decimalSeparator?: string;
   wordLayout?: WordParagraphLayoutOutput;
@@ -1172,14 +1175,27 @@ const applyTabLayoutToLines = (
  * @returns Line height in pixels (fontSize * 1.2 of the largest font in the range).
  *   For example: 16px font returns 19.2px line height, 24px font returns 28.8px.
  */
-function lineHeightForRuns(runs: Run[], fromRun: number, toRun: number, fallbackFontSize: number = 16): number {
+function lineHeightForRuns(
+  runs: Run[],
+  fromRun: number,
+  toRun: number,
+  fallbackFontSize: number = 16,
+  spacing?: ParagraphSpacing,
+): number {
   let maxSize = 0;
+  let fontFamily: string | undefined;
   for (let i = fromRun; i <= toRun; i += 1) {
     const run = runs[i];
     const textRun = run && isTextRun(run) ? run : null;
     const size = textRun?.fontSize ?? 0;
-    if (size > maxSize) maxSize = size;
+    if (size > maxSize) {
+      maxSize = size;
+      fontFamily = textRun?.fontFamily;
+    }
   }
+  // Same rule as the DOM measurer (font metrics × spacing multiple), so lines wrapped around a
+  // float are as tall as the paragraph's other lines and as in Word.
+  if (spacing) return resolveWordLineHeight(spacing, maxSize > 0 ? maxSize : fallbackFontSize, fontFamily);
   // Calculate line height as 120% of the maximum font size (maxSize * 1.2).
   // This multiplier provides reasonable line spacing for most text:
   // - The extra 20% accommodates descenders (g, y, p) and ascenders (h, k, l)
@@ -1581,7 +1597,10 @@ export function remeasureParagraph(
       width,
       ascent: 0,
       descent: 0,
-      lineHeight: Math.max(lineHeightForRuns(runs, startRun, endRun, lastMeasuredFontSize), lineMaxAtomicHeight),
+      lineHeight: Math.max(
+        lineHeightForRuns(runs, startRun, endRun, lastMeasuredFontSize, attrs?.spacing ?? {}),
+        lineMaxAtomicHeight,
+      ),
       maxWidth: effectiveMaxWidth,
       ...(lineMaxAtomicHeight > 0 ? { maxImageHeight: lineMaxAtomicHeight } : {}),
     };

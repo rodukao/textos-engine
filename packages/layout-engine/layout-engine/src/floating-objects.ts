@@ -261,7 +261,9 @@ export function createFloatingObjectManager(
 
       // Find the rightmost boundary from left floats (most intrusive on left)
       // distRight is the gap between the image's right edge and text wrapping on its right.
-      let leftBoundary = 0;
+      // Starts at the column's left edge (absolute), like rightBoundary starts at its right edge:
+      // with only right floats the text must still begin at the margin, not at the page edge.
+      let leftBoundary = columnOrigin;
       for (const zone of leftFloats) {
         const boundary = zone.bounds.x + zone.bounds.width + zone.distances.right;
         leftBoundary = Math.max(leftBoundary, boundary);

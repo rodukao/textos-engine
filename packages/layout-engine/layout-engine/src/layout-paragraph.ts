@@ -27,6 +27,7 @@ import {
   computeParagraphLayoutStartY,
 } from './layout-utils.js';
 import { layoutTextboxContent } from './layout-textbox.js';
+import { canLayoutInBands, isFullBand, layoutLinesInBands, sameBand, type LineBand } from './float-bands.js';
 import { resolveAnchoredGraphicY, resolveAnchoredGraphicX, getFragmentZIndex } from '@superdoc/contracts';
 import { createAnchoredTableFragment, isAnchoredTableFullWidth } from './layout-table.js';
 import type { AnchoredTable } from './anchors.js';
@@ -821,6 +822,8 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
   let narrowestWidth = columnWidth;
   let narrowestOffsetX = 0;
   let didRemeasureForFloats = false;
+  /** Width and offset of each line when the paragraph was laid out in bands around floats. */
+  let lineBands: LineBand[] | undefined;
 
   if (typeof remeasureParagraph === 'function') {
     const tempState = ensurePage();
@@ -852,7 +855,24 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     const narrowestRemeasureWidth = floatConstrained
       ? Math.max(1, narrowestWidth - Math.max(indentLeft, 0) - Math.max(indentRight, 0))
       : Math.max(1, narrowestWidth - indentLeft - indentRight);
-    if (narrowestRemeasureWidth < remeasureWidth || narrowestOffsetX > 0) {
+    const banded =
+      floatConstrained && canLayoutInBands(block, measure)
+        ? layoutLinesInBands({
+            block,
+            fullWidthLines: lines,
+            startY: paragraphAnchorBaseY,
+            columnWidth,
+            measureWidth: (bandWidth) => Math.max(1, bandWidth - Math.max(indentLeft, 0) - Math.max(indentRight, 0)),
+            bandAt: (y, height) =>
+              floatManager.computeAvailableWidth(y, height, columnWidth, tempState.columnIndex, tempState.page.number),
+            remeasure: (part, width) => normalizeLines(remeasureParagraph(part, width, 0)),
+          })
+        : undefined;
+    if (banded) {
+      lines = banded.lines;
+      lineBands = banded.bands;
+      didRemeasureForFloats = true;
+    } else if (narrowestRemeasureWidth < remeasureWidth || narrowestOffsetX > 0) {
       // Use the proper helper to calculate firstLineIndent based on list marker mode.
       const firstLineIndent = calculateFirstLineIndent(block, measure);
 
@@ -1168,9 +1188,12 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     // Use the narrowest width and offset if we remeasured
     let effectiveColumnWidth = columnWidth;
     let offsetX = 0;
+    const band = lineBands?.[fromLine];
+    // Lines laid out at full width below (or above) a float are placed like any other line.
+    const floatNarrowed = didRemeasureForFloats && !(band && isFullBand(band, columnWidth));
     if (didRemeasureForFloats) {
-      effectiveColumnWidth = narrowestWidth;
-      offsetX = narrowestOffsetX;
+      effectiveColumnWidth = band ? band.width : narrowestWidth;
+      offsetX = band ? band.offsetX : narrowestOffsetX;
     }
 
     // Reserve border expansion from available height so the slicer doesn't accept
@@ -1211,6 +1234,8 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
         continue;
       }
 
+      // A fragment has one x and width: start a new one where the band around floats changes.
+      if (band && !sameBand(lineBands?.[toLine], band)) break;
       const candidateBottom = state.cursorY + height + lineHeight + borderVertical;
       const effBot = computeEffectiveBottom(orderedDemand, nextRefs);
       if (candidateBottom > effBot) break;
@@ -1254,14 +1279,14 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     // Adjust x position: negative indent shifts left (e.g., -48px moves fragment 48px left).
     // When text was remeasured around floats, do not pull lines back into exclusion zones.
     const floatAdjustedX = columnX(state) + offsetX;
-    const adjustedX = didRemeasureForFloats
+    const adjustedX = floatNarrowed
       ? floatAdjustedX + Math.max(negativeLeftIndent, 0)
       : floatAdjustedX + negativeLeftIndent;
     const columnRight = columnX(state) + columnWidth;
-    let adjustedWidth = didRemeasureForFloats
+    let adjustedWidth = floatNarrowed
       ? effectiveColumnWidth
       : effectiveColumnWidth - negativeLeftIndent - negativeRightIndent;
-    if (didRemeasureForFloats) {
+    if (floatNarrowed) {
       adjustedWidth = Math.min(adjustedWidth, Math.max(1, columnRight - adjustedX));
     }
     const fragment: ParaFragment = {

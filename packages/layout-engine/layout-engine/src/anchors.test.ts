@@ -391,6 +391,31 @@ describe('anchors', () => {
   });
 
   describe('collectAnchoredDrawings', () => {
+    it('anchors a hoisted text box to the paragraph that hosted it (hostParagraph next)', () => {
+      // A caption text box sharing its <w:p> with text is imported just before that paragraph;
+      // its paragraph-relative position belongs to the host, not to the preceding paragraph.
+      const blocks: FlowBlock[] = [
+        { kind: 'paragraph', id: 'para-1', runs: [] },
+        {
+          kind: 'image',
+          id: 'caption',
+          src: 'test.png',
+          anchor: { isAnchored: true, vRelativeFrom: 'paragraph' },
+          attrs: { hostParagraph: 'next' },
+        } as ImageBlock,
+        { kind: 'paragraph', id: 'para-2', runs: [] },
+      ];
+      const measures: Measure[] = [
+        { kind: 'paragraph', lines: [], totalHeight: 0 },
+        { kind: 'image', width: 100, height: 100 } as ImageMeasure,
+        { kind: 'paragraph', lines: [], totalHeight: 0 },
+      ];
+
+      const result = collectAnchoredDrawings(blocks, measures);
+      expect(result.has(0)).toBe(false);
+      expect(result.get(2)?.[0].block.id).toBe('caption');
+    });
+
     it('should map paragraph-relative anchored image to nearest preceding paragraph', () => {
       const blocks: FlowBlock[] = [
         {

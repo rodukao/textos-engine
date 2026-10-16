@@ -59,16 +59,35 @@ function buildParagraphIndexById(blocks: FlowBlock[], len: number): Map<string, 
   return paragraphIndexById;
 }
 
-function findNearestParagraphIndex(blocks: FlowBlock[], len: number, fromIndex: number): number | null {
-  for (let i = fromIndex - 1; i >= 0; i -= 1) {
-    if (blocks[i].kind === 'paragraph') return i;
-  }
+function findNearestParagraphIndex(
+  blocks: FlowBlock[],
+  len: number,
+  fromIndex: number,
+  preferNext = false,
+): number | null {
+  const previous = (): number | null => {
+    for (let i = fromIndex - 1; i >= 0; i -= 1) {
+      if (blocks[i].kind === 'paragraph') return i;
+    }
+    return null;
+  };
+  const next = (): number | null => {
+    for (let i = fromIndex + 1; i < len; i += 1) {
+      if (blocks[i].kind === 'paragraph') return i;
+    }
+    return null;
+  };
+  return preferNext ? (next() ?? previous()) : (previous() ?? next());
+}
 
-  for (let i = fromIndex + 1; i < len; i += 1) {
-    if (blocks[i].kind === 'paragraph') return i;
-  }
-
-  return null;
+/**
+ * A text box that shared its <w:p> with text is imported as a separate block next to that
+ * paragraph, and records which side its host paragraph is on (attrs.hostParagraph). Its position
+ * (wp:positionV relativeFrom="paragraph") is relative to that host, not to the nearest preceding one.
+ */
+function hostParagraphOf(block: FlowBlock): unknown {
+  const attrs = (block as { attrs?: unknown }).attrs;
+  return typeof attrs === 'object' && attrs ? (attrs as { hostParagraph?: unknown }).hostParagraph : undefined;
 }
 
 function resolveAnchorParagraphIndex(
@@ -85,7 +104,7 @@ function resolveAnchorParagraphIndex(
     }
   }
 
-  return findNearestParagraphIndex(blocks, len, fromIndex);
+  return findNearestParagraphIndex(blocks, len, fromIndex, hostParagraphOf(blocks[fromIndex]) === 'next');
 }
 
 /**

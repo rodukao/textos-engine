@@ -750,13 +750,53 @@ const layoutLog = (...args: unknown[]): void => {
 };
 
 /**
+ * Page-relative objects anchored in a later paragraph, applied to an earlier paragraph during a
+ * layout pass: where each was applied, so the result can be checked against the page its anchor
+ * paragraph actually landed on.
+ */
+type LaterAnchorPlacement = { anchorId: string; anchorParagraphId: string; pageNumber: number };
+
+/**
  * Layout FlowBlocks into paginated fragments using measured line data.
  *
  * The function is intentionally deterministic: it walks the provided
  * FlowBlocks in order, consumes their Measure objects (same index),
  * and greedily stacks fragments inside the content box of each page/column.
+ *
+ * A page-relative object (wp:positionV relativeFrom="page"/"margin") belongs to the page of its
+ * anchor paragraph, and Word also wraps the earlier paragraphs of that page around it. Which page
+ * that is is only known after layout, so when the first pass applied such an object to a page
+ * other than the one its anchor paragraph landed on, a second pass uses the pages found.
  */
 export function layoutDocument(blocks: FlowBlock[], measures: Measure[], options: LayoutOptions = {}): Layout {
+  const placements: LaterAnchorPlacement[] = [];
+  const layout = layoutDocumentPass(blocks, measures, options, undefined, placements);
+  if (placements.length === 0) return layout;
+
+  const firstPageByBlockId = new Map<string, number>();
+  for (const page of layout.pages) {
+    for (const fragment of page.fragments) {
+      if (!firstPageByBlockId.has(fragment.blockId)) firstPageByBlockId.set(fragment.blockId, page.number);
+    }
+  }
+  const anchorPages = new Map<string, number>();
+  for (const placement of placements) {
+    const page = firstPageByBlockId.get(placement.anchorParagraphId);
+    if (page != null) anchorPages.set(placement.anchorId, page);
+  }
+  const misplaced = placements.some((placement) => anchorPages.get(placement.anchorId) !== placement.pageNumber);
+  return misplaced ? layoutDocumentPass(blocks, measures, options, anchorPages) : layout;
+}
+
+function layoutDocumentPass(
+  blocks: FlowBlock[],
+  measures: Measure[],
+  options: LayoutOptions,
+  /** Page of each later page-relative object's anchor paragraph, found by a previous pass. */
+  anchorPages?: ReadonlyMap<string, number>,
+  /** Filled with the later page-relative objects this pass applied to earlier paragraphs. */
+  placements?: LaterAnchorPlacement[],
+): Layout {
   if (blocks.length !== measures.length) {
     throw new Error(
       `layoutDocument expected measures for every block (blocks=${blocks.length}, measures=${measures.length})`,
@@ -2093,6 +2133,39 @@ export function layoutDocument(blocks: FlowBlock[], measures: Measure[], options
     return wrapType !== 'None' && wrapType !== 'Inline';
   };
 
+  const anchorParagraphIndexById = new Map<string, number>();
+  for (const [paraIndex, entries] of pageRelativeAnchorsByParagraph) {
+    for (const entry of entries) anchorParagraphIndexById.set(entry.block.id, paraIndex);
+  }
+
+  /**
+   * A page-relative object sits on the page of its anchor paragraph, so it only affects an
+   * earlier paragraph when the anchor paragraph starts on the same page. Estimate that from the
+   * measured height of the blocks in between (a lower bound: wrapping only makes them taller).
+   */
+  const anchorParagraphFitsOnCurrentPage = (paragraphIndex: number, anchorBlockId: string): boolean => {
+    const anchorParaIndex = anchorParagraphIndexById.get(anchorBlockId);
+    if (anchorParaIndex == null || anchorParaIndex <= paragraphIndex) return true;
+    const state = paginator.ensurePage();
+    const available = state.contentBottom - state.cursorY;
+    let height = 0;
+    for (let k = paragraphIndex; k < anchorParaIndex; k += 1) {
+      const candidate = blocks[k];
+      const candidateMeasure = measures[k];
+      if (!candidateMeasure) continue;
+      if (candidate.kind === 'paragraph') {
+        height +=
+          getParagraphSpacingBefore(candidate as ParagraphBlock) +
+          getParagraphSpacingAfter(candidate as ParagraphBlock);
+      }
+      if (candidate.kind === 'paragraph' || candidate.kind === 'table') {
+        height += getMeasureHeight(candidate, candidateMeasure);
+      }
+      if (height > available) return false;
+    }
+    return true;
+  };
+
   const collectLaterPageRelativeAnchorsForParagraph = (
     paragraphIndex: number,
     paragraphId: string,
@@ -2104,7 +2177,17 @@ export function layoutDocument(blocks: FlowBlock[], measures: Measure[], options
       if (anchorIndex == null || anchorIndex <= paragraphIndex) continue;
       if (!isWrappingDrawingAnchor(entry.block)) continue;
       if (!shouldWrapParagraphWithPageRelativeAnchor(entry.block, paragraphIndex, paragraphId)) continue;
+      const pageNumber = paginator.ensurePage().page.number;
+      if (anchorPages) {
+        if (anchorPages.get(entry.block.id) !== pageNumber) continue;
+      } else if (!anchorParagraphFitsOnCurrentPage(paragraphIndex, entry.block.id)) {
+        continue;
+      }
       anchors.push(entry);
+      const anchorParaIndex = anchorParagraphIndexById.get(entry.block.id);
+      if (placements && anchorParaIndex != null) {
+        placements.push({ anchorId: entry.block.id, anchorParagraphId: blocks[anchorParaIndex].id, pageNumber });
+      }
     }
 
     return anchors.length > 0 ? anchors : undefined;

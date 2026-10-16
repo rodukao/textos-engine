@@ -3832,6 +3832,19 @@ const appendSegment = (
 };
 
 /**
+ * Word's line height for text in the given font and size under a paragraph's spacing rule.
+ * For measurers that break lines without the DOM measurer (e.g. remeasuring around floats).
+ */
+export function resolveWordLineHeight(
+  spacing: ParagraphSpacing | undefined,
+  fontSize: number,
+  fontFamily?: string,
+): number {
+  const fontInfo = fontFamily ? { fontFamily, metricsFamily: fontFamily, fontSize } : undefined;
+  return resolveLineHeight(spacing, fontSize, singleLineHeight(fontSize, fontInfo));
+}
+
+/**
  * Applies the paragraph's line spacing rule to Word's single line height.
  *
  * - auto: `line` is a multiple of the single height (1 = single, 1.08, 1.5, 2...); multiples below

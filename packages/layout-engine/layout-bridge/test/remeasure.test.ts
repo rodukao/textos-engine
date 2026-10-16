@@ -188,8 +188,8 @@ describe('remeasureParagraph', () => {
       expect(measure.lines[0].fromChar).toBe(0);
       expect(measure.lines[0].toChar).toBe(5);
       expect(measure.lines[0].width).toBe(5 * CHAR_WIDTH);
-      expect(measure.lines[0].lineHeight).toBe(16 * 1.2); // fontSize * 1.2
-      expect(measure.totalHeight).toBe(16 * 1.2);
+      expect(measure.lines[0].lineHeight).toBe(18.4); // Word single line for Arial: 1.1499 × 16px, rounded up to 0.1px
+      expect(measure.totalHeight).toBe(18.4);
     });
 
     it('measures multiple runs on one line when they fit', () => {
@@ -300,8 +300,8 @@ describe('remeasureParagraph', () => {
       const measure = remeasureParagraph(block, 200);
 
       expect(measure.lines).toHaveLength(1);
-      // Line height should be based on largest font (24px * 1.2 = 28.8px)
-      expect(measure.lines[0].lineHeight).toBe(24 * 1.2);
+      // Line height should be based on largest font (Arial single: 1.1499 × 24px = 27.6px)
+      expect(measure.lines[0].lineHeight).toBe(27.6);
     });
 
     it('handles runs with different formatting on same line', () => {
@@ -1027,7 +1027,7 @@ describe('remeasureParagraph', () => {
       const measure = remeasureParagraph(block, 100);
 
       // Line height should be based on largest font
-      expect(measure.lines[0].lineHeight).toBe(30 * 1.2);
+      expect(measure.lines[0].lineHeight).toBe(34.5);
     });
 
     it('handles paragraph with no attrs defined', () => {
@@ -1133,10 +1133,10 @@ describe('remeasureParagraph', () => {
       const measure = remeasureParagraph(block, 200);
 
       expect(measure.lines).toHaveLength(2);
-      expect(measure.lines[0].lineHeight).toBe(24 * 1.2);
+      expect(measure.lines[0].lineHeight).toBe(27.6);
       expect(measure.lines[1].fromRun).toBe(1);
       expect(measure.lines[1].toRun).toBe(1);
-      expect(measure.lines[1].lineHeight).toBe(24 * 1.2);
+      expect(measure.lines[1].lineHeight).toBe(27.6);
     });
 
     it('preserves multiple trailing explicit lineBreak runs as multiple empty lines', () => {
@@ -1296,9 +1296,9 @@ describe('remeasureParagraph', () => {
       ]);
       const measure = remeasureParagraph(block, 200);
 
-      // All runs on same line, lineHeight should be max (20 * 1.2 = 24)
+      // All runs on same line, lineHeight should be max (Arial single: 1.1499 × 20px = 23px)
       expect(measure.lines).toHaveLength(1);
-      expect(measure.lines[0].lineHeight).toBe(20 * 1.2);
+      expect(measure.lines[0].lineHeight).toBe(23);
     });
 
     it('handles alternating text and tab runs', () => {
@@ -1661,7 +1661,7 @@ describe('remeasureParagraph', () => {
       expect(measure.lines[0].toRun).toBe(0);
       expect(measure.lines[0].toChar).toBe(2);
       expect(measure.lines[0].maxImageHeight).toBeUndefined();
-      expect(measure.lines[0].lineHeight).toBeCloseTo(16 * 1.2);
+      expect(measure.lines[0].lineHeight).toBeCloseTo(18.4);
       expect(measure.lines[1].maxImageHeight).toBe(179);
     });
 
