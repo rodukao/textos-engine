@@ -31,6 +31,9 @@ export type FontMetricsResult = {
   descent: number;
   /** fontBoundingBoxAscent + fontBoundingBoxDescent, when the browser reports them. */
   fontBoundingHeight?: number;
+  /** fontBoundingBoxAscent / Descent: the font's content area, which CSS lays text out in. */
+  fontBoundingAscent?: number;
+  fontBoundingDescent?: number;
 };
 
 /**
@@ -227,6 +230,8 @@ export function getFontMetrics(
   const boundingHeight = (textMetrics.fontBoundingBoxAscent ?? 0) + (textMetrics.fontBoundingBoxDescent ?? 0);
   if (Number.isFinite(boundingHeight) && boundingHeight > 0) {
     result.fontBoundingHeight = boundingHeight;
+    result.fontBoundingAscent = textMetrics.fontBoundingBoxAscent;
+    result.fontBoundingDescent = textMetrics.fontBoundingBoxDescent;
   }
 
   // Cache the result (with size limit)

@@ -1,3 +1,4 @@
+import type { Line } from '@superdoc/contracts';
 import { DOM_CLASS_NAMES } from './constants.js';
 
 /**
@@ -100,9 +101,27 @@ export const fragmentStyles: Partial<CSSStyleDeclaration> = {
  * the resize overlay (and other UI) can stack above content. Only the image
  * element itself gets z-index for layering within the line (e.g. above tab leaders).
  */
-export const lineStyles = (lineHeight: number): Partial<CSSStyleDeclaration> => ({
-  lineHeight: `${lineHeight}px`,
+/**
+ * Where the line's text box goes, when the measurer placed the text as Word does (see
+ * Line.textBaseline): a box as tall as the font's content area, pushed down so the baseline lands
+ * at textBaseline. Undefined keeps the text centered in the line (CSS line-height).
+ */
+export const lineTextBox = (
+  line: Pick<Line, 'textBaseline' | 'textBoxAscent' | 'textBoxDescent'> | undefined,
+): { paddingTop: number; lineHeight: number } | undefined => {
+  if (!line || line.textBaseline == null || line.textBoxAscent == null || line.textBoxDescent == null) return undefined;
+  const paddingTop = line.textBaseline - line.textBoxAscent;
+  if (!(paddingTop >= 0)) return undefined;
+  return { paddingTop, lineHeight: line.textBoxAscent + line.textBoxDescent };
+};
+
+export const lineStyles = (
+  lineHeight: number,
+  line?: Pick<Line, 'textBaseline' | 'textBoxAscent' | 'textBoxDescent'>,
+): Partial<CSSStyleDeclaration> => ({
+  lineHeight: `${lineTextBox(line)?.lineHeight ?? lineHeight}px`,
   height: `${lineHeight}px`,
+  ...(lineTextBox(line) ? { paddingTop: `${lineTextBox(line)!.paddingTop}px`, boxSizing: 'border-box' } : {}),
   // Eliminate the CSS "strut" created by the inherited font-size (typically
   // the browser default 16px). Without this, the strut shifts normal-flow
   // inline children down via baseline alignment, while absolutely-positioned

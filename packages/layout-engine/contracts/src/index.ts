@@ -2024,6 +2024,14 @@ export type Line = {
   segments?: LineSegment[];
   leaders?: LeaderDecoration[];
   bars?: BarDecoration[];
+  /**
+   * Where the text sits in the line, as Word places it: distance from the line's top to the
+   * baseline, and the content area (ascent/descent) of the font the text is drawn in. Without
+   * them painters center the text in the line.
+   */
+  textBaseline?: number;
+  textBoxAscent?: number;
+  textBoxDescent?: number;
 };
 
 export type LineSegment = {

@@ -1,4 +1,5 @@
 import type { Line, LineSegment, Run } from '@superdoc/contracts';
+import { lineTextBox } from '../styles.js';
 import { underlineThicknessPx } from './text-run.js';
 import { applyTrackedChangeDecorations, getTrackedChangeLayers } from './tracked-changes.js';
 import type { TrackedChangesRenderConfig } from './types.js';
@@ -180,7 +181,8 @@ export const renderPositionedTabRun = (
  */
 export const underlineOffsetFromLineTop = (line: Line): number => {
   const halfLeading = Math.max(0, (line.lineHeight - line.ascent - line.descent) / 2);
-  const baselineFromTop = halfLeading + line.ascent;
+  // Word-placed text (Line.textBaseline) has its baseline there rather than centered.
+  const baselineFromTop = lineTextBox(line) ? line.textBaseline! : halfLeading + line.ascent;
   const underlineGap = Math.min(line.descent, line.lineHeight * 0.08);
   return baselineFromTop + underlineGap;
 };

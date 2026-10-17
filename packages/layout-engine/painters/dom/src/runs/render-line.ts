@@ -14,7 +14,7 @@ import {
   isMinimalWordLayout as isMinimalWordLayoutShared,
   type MinimalWordLayout,
 } from '@superdoc/common/list-marker-utils';
-import { CLASS_NAMES, lineStyles } from '../styles.js';
+import { CLASS_NAMES, lineStyles, lineTextBox } from '../styles.js';
 import { applyRtlStyles, shouldUseSegmentPositioning } from '../features/inline-direction/index.js';
 import { applyTooltipAccessibility } from './links.js';
 import { appendFormattingParagraphMark } from './formatting-marks.js';
@@ -330,7 +330,7 @@ export const renderLine = ({
 
   const el = runContext.doc.createElement('div');
   el.classList.add(CLASS_NAMES.line);
-  applyStyles(el, lineStyles(line.lineHeight));
+  applyStyles(el, lineStyles(line.lineHeight, line));
   el.dataset.layoutEpoch = String(runContext.layoutEpoch);
   const paragraphAttrs = (block.attrs as ParagraphAttrs | undefined) ?? {};
   const styleId = paragraphAttrs.styleId;
@@ -721,12 +721,17 @@ const renderExplicitlyPositionedRuns = ({
         geoSdtWrapper.style.padding = '0px';
         geoSdtWrapper.style.borderWidth = '0px';
         geoSdtWrapper.style.lineHeight = `${line.lineHeight}px`;
+        const sdtTextBox = lineTextBox(line);
+        if (sdtTextBox) {
+          geoSdtWrapper.style.boxSizing = 'border-box';
+          geoSdtWrapper.style.paddingTop = `${sdtTextBox.paddingTop}px`;
+        }
       }
       if (isImageRun(runForSdt)) {
         geoSdtWrapper.dataset.containsInlineImage = 'true';
       }
       runContext.syncInlineSdtWrapperTypography(geoSdtWrapper, runForSdt);
-      geoSdtWrapper.style.lineHeight = `${line.lineHeight}px`;
+      geoSdtWrapper.style.lineHeight = `${lineTextBox(line)?.lineHeight ?? line.lineHeight}px`;
       elem.style.left = `${elemLeftPx - geoSdtWrapperLeft}px`;
       elem.style.top = '0px';
       geoSdtMaxRight = Math.max(geoSdtMaxRight, elemLeftPx + elemWidthPx);

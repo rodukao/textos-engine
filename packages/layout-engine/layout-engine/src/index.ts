@@ -3053,8 +3053,8 @@ function layoutDocumentPass(
       const activeCols = getActiveColumnsForState(state);
 
       if (state.columnIndex < resolveColumnCount(activeCols) - 1) {
-        // Not in last column: advance to next column
-        advanceColumn(state);
+        // Not in last column: advance to next column (a manual break: space before is kept)
+        advanceColumn(state).atNaturalBreak = false;
       } else {
         // In last column: start new page
         paginator.startNewPage();

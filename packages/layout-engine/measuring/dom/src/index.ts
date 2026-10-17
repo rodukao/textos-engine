@@ -454,11 +454,7 @@ function calculateTypographyMetrics(
   fontSize: number,
   spacing?: ParagraphSpacing,
   fontInfo?: FontInfo,
-): {
-  ascent: number;
-  descent: number;
-  lineHeight: number;
-} {
+): TypographyMetrics {
   const resolvedFontSize = normalizeFontSize(fontSize);
   let ascent: number;
   let descent: number;
@@ -480,13 +476,69 @@ function calculateTypographyMetrics(
     descent = roundValue(resolvedFontSize * 0.2);
   }
 
-  const lineHeight = resolveLineHeight(spacing, fontSize, singleLineHeight(fontSize, fontInfo));
+  const single = singleLineHeight(fontSize, fontInfo);
+  const lineHeight = resolveLineHeight(spacing, fontSize, single);
 
   return {
     ascent,
     descent,
     lineHeight,
+    ...wordTextPlacement(spacing, single, lineHeight, fontInfo),
   };
+}
+
+type TypographyMetrics = {
+  ascent: number;
+  descent: number;
+  lineHeight: number;
+  textBaseline?: number;
+  textBoxAscent?: number;
+  textBoxDescent?: number;
+};
+
+/**
+ * Where Word puts the text inside a line, measured from its PDFs (Arial 11pt at the top of a page):
+ * - single and multiple spacing: the baseline stays where single spacing puts it (the font's
+ *   external leading and ascent from the top); the extra of 1.5, double etc. goes below the text
+ * - "at least" taller than single: the text sits at the bottom, the extra goes above it
+ * - "exactly": the baseline is at 80% of the line height
+ * The text box is the content area of the drawn font, so painters can place it by that baseline.
+ */
+function wordTextPlacement(
+  spacing: ParagraphSpacing | undefined,
+  single: number,
+  lineHeight: number,
+  fontInfo?: FontInfo,
+): Pick<TypographyMetrics, 'textBaseline' | 'textBoxAscent' | 'textBoxDescent'> {
+  if (!fontInfo || !isValidFontSize(fontInfo.fontSize) || !fontInfo.fontFamily?.trim()) return {};
+  const metrics = getFontMetrics(getCanvasContext(), fontInfo, measurementConfig.mode, measurementConfig.fonts);
+  const ascent = metrics.fontBoundingAscent;
+  const descent = metrics.fontBoundingDescent;
+  if (!(typeof ascent === 'number' && ascent > 0 && typeof descent === 'number' && descent >= 0)) return {};
+  const rule = spacing?.lineRule ?? 'auto';
+  const isPx = spacing?.line != null && spacing.lineUnit !== 'multiplier';
+  let baseline: number;
+  if (rule === 'exact' && isPx) baseline = 0.8 * lineHeight;
+  else if (rule === 'atLeast' && isPx && lineHeight > single) baseline = lineHeight - descent;
+  else baseline = Math.min(single, lineHeight) - descent;
+  // A baseline above the font's ascent would need the text to start above the line: keep centering.
+  if (baseline < ascent - 0.5) return {};
+  return { textBaseline: baseline, textBoxAscent: ascent, textBoxDescent: descent };
+}
+
+/**
+ * Text placement for measurers that break lines without the DOM measurer (e.g. remeasuring around
+ * floats), from the run's font family and size.
+ */
+export function resolveWordTextPlacement(
+  spacing: ParagraphSpacing | undefined,
+  fontSize: number,
+  fontFamily: string | undefined,
+  lineHeight: number,
+): Pick<TypographyMetrics, 'textBaseline' | 'textBoxAscent' | 'textBoxDescent'> {
+  if (!fontFamily) return {};
+  const fontInfo = { fontFamily, metricsFamily: fontFamily, fontSize };
+  return wordTextPlacement(spacing, singleLineHeight(fontSize, fontInfo), lineHeight, fontInfo);
 }
 
 /**
@@ -500,11 +552,15 @@ function calculateTypographyMetrics(
 function finalizeLineMetrics(
   line: { maxFontSize: number; maxFontInfo?: FontInfo; maxImageHeight?: number },
   spacing?: ParagraphSpacing,
-): { ascent: number; descent: number; lineHeight: number } {
+): TypographyMetrics {
   const metrics = calculateTypographyMetrics(line.maxFontSize, spacing, line.maxFontInfo);
   const imageH = line.maxImageHeight ?? 0;
   if (imageH > metrics.lineHeight) {
     metrics.lineHeight = imageH;
+    // An inline image sets the line's height; its text placement no longer applies.
+    delete metrics.textBaseline;
+    delete metrics.textBoxAscent;
+    delete metrics.textBoxDescent;
   }
   return metrics;
 }
@@ -530,11 +586,7 @@ function calculateEmptyParagraphMetrics(
   fontSize: number,
   spacing?: ParagraphSpacing,
   fontInfo?: FontInfo,
-): {
-  ascent: number;
-  descent: number;
-  lineHeight: number;
-} {
+): TypographyMetrics {
   const resolvedFontSize = normalizeFontSize(fontSize);
   let ascent: number;
   let descent: number;
@@ -554,12 +606,14 @@ function calculateEmptyParagraphMetrics(
     descent = roundValue(resolvedFontSize * 0.2);
   }
 
-  const lineHeight = resolveLineHeight(spacing, resolvedFontSize, singleLineHeight(resolvedFontSize, fontInfo));
+  const single = singleLineHeight(resolvedFontSize, fontInfo);
+  const lineHeight = resolveLineHeight(spacing, resolvedFontSize, single);
 
   return {
     ascent,
     descent,
     lineHeight,
+    ...wordTextPlacement(spacing, single, lineHeight, fontInfo),
   };
 }
 

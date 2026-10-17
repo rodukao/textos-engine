@@ -8,6 +8,11 @@ export type ConstraintBoundary = {
 
 export type PageState = {
   page: Page;
+  /**
+   * The current column (or page) began because the previous content did not fit, not at a manual
+   * break: Word drops a paragraph's space before at its top.
+   */
+  atNaturalBreak?: boolean;
   cursorY: number;
   columnIndex: number;
   topMargin: number;
@@ -172,9 +177,12 @@ export function createPaginator(opts: PaginatorOptions) {
       // must reset per-column. Field names retain "ThisPage" for back-compat.
       state.footnoteAnchorsThisPage = [];
       state.footnoteRefsThisPage = 0;
+      state.atNaturalBreak = true;
       return state;
     }
-    return startNewPage();
+    const next = startNewPage();
+    next.atNaturalBreak = true;
+    return next;
   };
 
   const getPageByNumber = (pageNumber: number): PageState => {

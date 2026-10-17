@@ -1047,6 +1047,12 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
       }
     }
 
+    // Word drops "space before" at the top of a page or column the text reached by a natural break,
+    // and keeps it after a manual page break.
+    if (!appliedSpacingBefore && spacingBefore > 0 && state.atNaturalBreak && state.cursorY <= state.topMargin + 0.5) {
+      spacingBefore = 0;
+      appliedSpacingBefore = true;
+    }
     if (!appliedSpacingBefore && spacingBefore > 0) {
       while (!appliedSpacingBefore) {
         const prevTrailing = state.trailingSpacing ?? 0;

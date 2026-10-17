@@ -25,7 +25,7 @@ import {
   type MeasureAtomicText,
   type MinimalAtomicRun,
 } from '@superdoc/common/atomic-run-size';
-import { measureUnhintedTextWidth, resolveWordLineHeight } from '@superdoc/measuring-dom';
+import { measureUnhintedTextWidth, resolveWordLineHeight, resolveWordTextPlacement } from '@superdoc/measuring-dom';
 
 /**
  * Type definition for paragraph block attributes that include indentation and tab stops.
@@ -1198,6 +1198,26 @@ const applyTabLayoutToLines = (
  * @returns Line height in pixels (fontSize * 1.2 of the largest font in the range).
  *   For example: 16px font returns 19.2px line height, 24px font returns 28.8px.
  */
+/** Size and family of the largest text run in the range (the one that sets the line's metrics). */
+function largestFontForRuns(
+  runs: Run[],
+  fromRun: number,
+  toRun: number,
+  fallbackFontSize: number,
+): { size: number; family: string | undefined } {
+  let size = 0;
+  let family: string | undefined;
+  for (let i = fromRun; i <= toRun; i += 1) {
+    const run = runs[i];
+    const textRun = run && isTextRun(run) ? run : null;
+    if ((textRun?.fontSize ?? 0) > size) {
+      size = textRun!.fontSize;
+      family = textRun!.fontFamily;
+    }
+  }
+  return { size: size > 0 ? size : fallbackFontSize, family };
+}
+
 function lineHeightForRuns(
   runs: Run[],
   fromRun: number,
@@ -1612,6 +1632,8 @@ export function remeasureParagraph(
 
     const lineMaxAtomicHeight = getLineMaxAtomicHeight(runs, startRun, startChar, endRun, endChar);
 
+    const textLineHeight = lineHeightForRuns(runs, startRun, endRun, lastMeasuredFontSize, attrs?.spacing ?? {});
+    const lineFont = largestFontForRuns(runs, startRun, endRun, lastMeasuredFontSize);
     const line: Line = {
       fromRun: startRun,
       fromChar: startChar,
@@ -1620,12 +1642,13 @@ export function remeasureParagraph(
       width,
       ascent: 0,
       descent: 0,
-      lineHeight: Math.max(
-        lineHeightForRuns(runs, startRun, endRun, lastMeasuredFontSize, attrs?.spacing ?? {}),
-        lineMaxAtomicHeight,
-      ),
+      lineHeight: Math.max(textLineHeight, lineMaxAtomicHeight),
       maxWidth: effectiveMaxWidth,
       ...(lineMaxAtomicHeight > 0 ? { maxImageHeight: lineMaxAtomicHeight } : {}),
+      // Where the text sits in the line, as the DOM measurer places it (not when an image sets the height).
+      ...(lineMaxAtomicHeight > textLineHeight
+        ? {}
+        : resolveWordTextPlacement(attrs?.spacing ?? {}, lineFont.size, lineFont.family, textLineHeight)),
     };
     lines.push(line);
     if (lineMaxTextFontSize > 0) {
