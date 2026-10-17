@@ -469,6 +469,7 @@ describe('legacy-handle-paragraph-node hoisted shapes', () => {
     schema: {
       nodes: {
         shapeContainer: { isInline: false, spec: { group: 'block' } },
+        shapeGroup: { isInline: true, spec: { group: 'inline' } },
         text: { isInline: true, spec: { group: 'inline' } },
       },
     },
@@ -497,6 +498,23 @@ describe('legacy-handle-paragraph-node hoisted shapes', () => {
     const out = handleParagraphNode(paragraphWith([text('Body'), shape()]));
     expect(out.map((n) => n.type)).toEqual(['paragraph', 'shapeContainer']);
     expect(out[1].attrs.hostParagraph).toBe('previous');
+  });
+
+  it('points every shape of a group sharing the paragraph to its text fragment', () => {
+    const out = handleParagraphNode(paragraphWith([shape(), shape(), text('Body')]));
+    expect(out.map((n) => n.type)).toEqual(['shapeContainer', 'shapeContainer', 'paragraph']);
+    expect(out[0].attrs.hostParagraph).toBe('next');
+    expect(out[1].attrs.hostParagraph).toBe('next');
+  });
+
+  it('keeps a floating group with the text when a shape comes between them', () => {
+    // Word: a chart group, a caption box and the text share one <w:p>; splitting off the group
+    // would export it as an extra empty paragraph.
+    const group = { type: 'shapeGroup', attrs: { anchorData: { hRelativeFrom: 'column' }, wrap: { type: 'None' } } };
+    const out = handleParagraphNode(paragraphWith([group, shape(), text('Body')]));
+    expect(out.map((n) => n.type)).toEqual(['shapeContainer', 'paragraph']);
+    expect(out[0].attrs.hostParagraph).toBe('next');
+    expect(out[1].content.map((n) => n.type)).toEqual(['shapeGroup', 'text']);
   });
 
   it('leaves hostParagraph unset when the shape is the only content of its paragraph', () => {

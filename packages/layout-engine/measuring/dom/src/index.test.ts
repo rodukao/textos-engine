@@ -1354,6 +1354,23 @@ describe('measureBlock', () => {
       expect(measure.lines[0].lineHeight).toBeCloseTo(baseLineHeight, 1);
     });
 
+    it('breaks a line after a hyphen inside a word, as Word does', async () => {
+      const runOf = (text: string) => ({ text, fontFamily: 'Arial', fontSize: 16 });
+      const widthOf = async (text: string) =>
+        expectParagraphMeasure(await measureBlock({ kind: 'paragraph', id: 'w', runs: [runOf(text)] }, 2000)).lines[0]
+          .width;
+      // Room for 'Drugs classified as high-' but not for the whole 'high-alert'.
+      const maxWidth = (await widthOf('Drugs classified as high-')) + 2;
+      const measure = expectParagraphMeasure(
+        await measureBlock(
+          { kind: 'paragraph', id: 'h', runs: [runOf('Drugs classified as high-alert medications')] },
+          maxWidth,
+        ),
+      );
+      expect(measure.lines[0].toChar).toBe('Drugs classified as high-'.length);
+      expect(measure.lines[1].fromChar).toBe('Drugs classified as high-'.length);
+    });
+
     describe('Word line height (measured against Word 16)', () => {
       const pt = (value: number) => (value * 96) / 72;
       const lineHeightOf = async (

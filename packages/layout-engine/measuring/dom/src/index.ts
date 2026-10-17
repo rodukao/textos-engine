@@ -2277,7 +2277,17 @@ async function measureParagraphBlock(
         continue;
       }
 
-      const words = segment.split(' ');
+      // Word can also break a line right after a hyphen inside a word ("high-" | "alert"): such
+      // pieces follow each other with no space between them (joinedToNext).
+      const words: string[] = [];
+      const joinedToNext: boolean[] = [];
+      for (const spaced of segment.split(' ')) {
+        const pieces = spaced.split(/(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u);
+        pieces.forEach((piece, index) => {
+          words.push(piece);
+          joinedToNext.push(index < pieces.length - 1);
+        });
+      }
       // `split(' ')` produces empty strings for leading, consecutive, AND trailing spaces.
       // We need to know the last non-empty word index so we don't double-count a trailing space:
       //   "Por " → ["Por", ""]  (one trailing space)
@@ -2433,7 +2443,7 @@ async function measureParagraphBlock(
         // Only include the implicit single delimiter space when there is a later non-empty word
         // in this same segment (i.e., before the next word). Do NOT include one before tabs or
         // at the end of the segment; those spaces are represented explicitly by "" tokens.
-        const shouldIncludeDelimiterSpace = wordIndex < lastNonEmptyWordIndex;
+        const shouldIncludeDelimiterSpace = wordIndex < lastNonEmptyWordIndex && !joinedToNext[wordIndex];
         const wordEndNoSpace = charPosInRun + word.length;
         const spaceWidth = shouldIncludeDelimiterSpace ? measureRunWidth(' ', font, ctx, run, wordEndNoSpace) : 0;
         const wordCommitWidth = wordOnlyWidth + spaceWidth;

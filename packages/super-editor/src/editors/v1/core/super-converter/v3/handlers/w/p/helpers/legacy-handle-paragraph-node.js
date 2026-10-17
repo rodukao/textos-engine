@@ -42,6 +42,21 @@ function cloneParagraphAttrsForFragment(attrs, { keepSectPr = false } = {}) {
 
 const HOISTED_DRAWING_TYPE = 'shapeContainer';
 
+/**
+ * Inline content made only of floating (anchored) objects, e.g. a grouped chart drawn over the page.
+ * It takes no room in the text, so it should not become a paragraph of its own.
+ */
+function isFloatingOnly(node) {
+  if (!node) return false;
+  if (node.type === 'run')
+    return Array.isArray(node.content) && node.content.length > 0 && node.content.every(isFloatingOnly);
+  if (node.type !== 'shapeGroup' && node.type !== 'image') return false;
+  const attrs = node.attrs || {};
+  if (attrs.isAnchor === true) return true;
+  const wrapType = attrs.wrap?.type;
+  return Boolean(attrs.anchorData) && wrapType != null && wrapType !== 'Inline';
+}
+
 function hasSectionBreakAttrs(attrs) {
   return Boolean(attrs?.paragraphProperties?.sectPr);
 }
@@ -71,7 +86,11 @@ function normalizeParagraphChildren(children, schema, textblockAttrs) {
       continue;
     }
 
-    flushInline();
+    // A hoisted shape between floating objects and the paragraph's text must not leave the
+    // floating objects in a paragraph of their own (an extra empty line): they join the text.
+    if (!(child?.type === HOISTED_DRAWING_TYPE && pendingInline.length && pendingInline.every(isFloatingOnly))) {
+      flushInline();
+    }
     if (child != null) normalized.push(child);
   }
 
@@ -104,12 +123,16 @@ function normalizeParagraphChildren(children, schema, textblockAttrs) {
   if (!isSingleBlockResult) {
     normalized.forEach((node, index) => {
       if (node?.type !== HOISTED_DRAWING_TYPE) return;
-      const host =
-        normalized[index + 1]?.type === 'paragraph'
-          ? 'next'
-          : normalized[index - 1]?.type === 'paragraph'
-            ? 'previous'
-            : null;
+      // Several shapes can share the paragraph (e.g. two caption boxes before the text): look past
+      // the other hoisted shapes for the text fragment they all came from.
+      const paragraphAt = (step) => {
+        for (let k = index + step; k >= 0 && k < normalized.length; k += step) {
+          if (normalized[k]?.type === HOISTED_DRAWING_TYPE) continue;
+          return normalized[k]?.type === 'paragraph';
+        }
+        return false;
+      };
+      const host = paragraphAt(1) ? 'next' : paragraphAt(-1) ? 'previous' : null;
       if (host) normalized[index] = { ...node, attrs: { ...(node.attrs || {}), hostParagraph: host } };
     });
   }

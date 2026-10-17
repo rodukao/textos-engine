@@ -1055,6 +1055,13 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     }
     if (!appliedSpacingBefore && spacingBefore > 0) {
       while (!appliedSpacingBefore) {
+        // The spacing did not fit and moved the paragraph to a new page/column: dropped there too.
+        if (state.atNaturalBreak && state.cursorY <= state.topMargin + 0.5) {
+          spacingBefore = 0;
+          state.trailingSpacing = 0;
+          appliedSpacingBefore = true;
+          break;
+        }
         const prevTrailing = state.trailingSpacing ?? 0;
         const neededSpacingBefore = collapseSpacingBefore(spacingBefore, state.trailingSpacing);
         if (spacingDebugEnabled) {
