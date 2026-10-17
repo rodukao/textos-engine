@@ -437,6 +437,8 @@ export const computeParagraphAttrs = (
     tabIntervalTwips,
     keepNext: resolvedParagraphProperties.keepNext,
     keepLines: resolvedParagraphProperties.keepLines,
+    // Word applies widow/orphan control unless the document turns it off explicitly.
+    widowControl: resolvedParagraphProperties.widowControl ?? true,
     floatAlignment: floatAlignment,
     pageBreakBefore: resolvedParagraphProperties.pageBreakBefore,
     directionContext,

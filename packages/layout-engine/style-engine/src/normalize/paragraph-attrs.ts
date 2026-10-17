@@ -59,6 +59,8 @@ export function normalizeParagraphAttrsFromOoxml(
 
   if (props.keepNext) attrs.keepNext = true;
   if (props.keepLines) attrs.keepLines = true;
+  // Word applies widow/orphan control unless the document turns it off explicitly.
+  attrs.widowControl = props.widowControl ?? true;
   if (props.pageBreakBefore) attrs.pageBreakBefore = true;
   if (props.contextualSpacing) attrs.contextualSpacing = true;
   if (props.runProperties?.vanish === true) {

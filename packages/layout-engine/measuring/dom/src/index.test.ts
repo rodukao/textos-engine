@@ -80,8 +80,8 @@ describe('measureBlock', () => {
       expect(measure.lines[0].ascent).toBeLessThan(16 * 1.2); // Should be reasonable for 16px font
       expect(measure.lines[0].descent).toBeGreaterThan(0);
       expect(measure.lines[0].descent).toBeLessThan(16 * 0.5);
-      // Word: Arial 12pt single = 13.8pt = 18.4px (font metrics, not glyph bounds)
-      expect(measure.lines[0].lineHeight).toBeCloseTo(18.4, 5);
+      // Arial single: 1.1499 × 16px (font metrics, not glyph bounds)
+      expect(measure.lines[0].lineHeight).toBeCloseTo(1.1499 * 16, 5);
       expect(measure.totalHeight).toBe(measure.lines[0].lineHeight);
     });
 
@@ -1221,8 +1221,8 @@ describe('measureBlock', () => {
 
       const measure = expectParagraphMeasure(await measureBlock(block, 400));
       // `lineUnit: "multiplier"` multiplies the font's single line height.
-      // Word: Arial 12pt at 1.5 lines = 20.7pt = 27.6px
-      expect(measure.lines[0].lineHeight).toBeCloseTo(27.6, 5);
+      // Arial 12pt at 1.5 lines: 1.1499 × 16px × 1.5
+      expect(measure.lines[0].lineHeight).toBeCloseTo(1.1499 * 16 * 1.5, 5);
     });
 
     it('applies higher auto multipliers to the baseline line height', async () => {
@@ -1243,8 +1243,8 @@ describe('measureBlock', () => {
       };
 
       const measure = expectParagraphMeasure(await measureBlock(block, 400));
-      // Arial single (1.1499 × 16px) × 2, rounded up to 0.1px
-      expect(measure.lines[0].lineHeight).toBeCloseTo(36.8, 5);
+      // Arial single (1.1499 × 16px) × 2
+      expect(measure.lines[0].lineHeight).toBeCloseTo(1.1499 * 16 * 2, 5);
     });
 
     it('applies large auto values as multipliers', async () => {
@@ -1264,7 +1264,7 @@ describe('measureBlock', () => {
       };
 
       const measure = expectParagraphMeasure(await measureBlock(block, 400));
-      expect(measure.lines[0].lineHeight).toBeCloseTo(772.8, 5);
+      expect(measure.lines[0].lineHeight).toBeCloseTo(1.1499 * 16 * 42, 5);
     });
 
     it('does not clamp line height for very small fonts', async () => {
@@ -1372,42 +1372,49 @@ describe('measureBlock', () => {
         return measure.lines[0].lineHeight;
       };
 
+      // Exact heights, as Word lays out for print and PDF (on screen it rounds up to 1/960 inch).
+      const CALIBRI = 1.2207;
+      const CAMBRIA = 1.17236;
+      const multiple = (line: number) => ({
+        line: line / 240,
+        lineUnit: 'multiplier' as const,
+        lineRule: 'auto' as const,
+      });
+
       it('uses the font metrics for single spacing, not glyph bounds or 1.15', async () => {
-        expect(await lineHeightOf('Calibri', 11)).toBeCloseTo(pt(13.5), 5);
-        expect(await lineHeightOf('Cambria', 11)).toBeCloseTo(pt(12.9), 5);
-        expect(await lineHeightOf('Times New Roman', 12)).toBeCloseTo(pt(13.8), 5);
-        expect(await lineHeightOf('Segoe UI', 10)).toBeCloseTo(pt(13.35), 5);
+        expect(await lineHeightOf('Calibri', 11)).toBeCloseTo(CALIBRI * pt(11), 5);
+        expect(await lineHeightOf('Cambria', 11)).toBeCloseTo(CAMBRIA * pt(11), 5);
+        expect(await lineHeightOf('Times New Roman', 12)).toBeCloseTo(1.1499 * pt(12), 5);
+        expect(await lineHeightOf('Segoe UI', 10)).toBeCloseTo(1.33008 * pt(10), 5);
       });
 
       it('applies multiple spacing to the single height (Word default 1.08)', async () => {
-        const multiple = { line: 259 / 240, lineUnit: 'multiplier' as const, lineRule: 'auto' as const };
-        expect(await lineHeightOf('Calibri', 11, multiple)).toBeCloseTo(pt(14.55), 5);
-        expect(await lineHeightOf('Cambria', 11, multiple)).toBeCloseTo(pt(13.95), 5);
-        expect(await lineHeightOf('Georgia', 12, multiple)).toBeCloseTo(pt(14.775), 5);
+        // Word's PDF of Calibri 11pt at 1.08: lines every 14.52/14.40pt, i.e. an exact 14.49pt.
+        expect(await lineHeightOf('Calibri', 11, multiple(259))).toBeCloseTo(CALIBRI * pt(11) * (259 / 240), 5);
+        expect(await lineHeightOf('Cambria', 11, multiple(259))).toBeCloseTo(CAMBRIA * pt(11) * (259 / 240), 5);
       });
 
       it('shrinks lines for multiples below 1', async () => {
-        const multiple = { line: 0.8, lineUnit: 'multiplier' as const, lineRule: 'auto' as const };
-        expect(await lineHeightOf('Calibri', 11, multiple)).toBeCloseTo(pt(10.8), 5);
+        expect(await lineHeightOf('Calibri', 11, multiple(192))).toBeCloseTo(CALIBRI * pt(11) * 0.8, 5);
       });
 
       it('uses the single height as the floor for atLeast', async () => {
         expect(await lineHeightOf('Calibri', 11, { line: pt(12), lineUnit: 'px', lineRule: 'atLeast' })).toBeCloseTo(
-          pt(13.5),
+          CALIBRI * pt(11),
           5,
         );
         expect(await lineHeightOf('Calibri', 11, { line: pt(16), lineUnit: 'px', lineRule: 'atLeast' })).toBeCloseTo(
-          pt(16.05),
+          pt(16),
           5,
         );
       });
 
       it('gives empty paragraphs the same height as a line of text', async () => {
-        expect(await lineHeightOf('Calibri', 11, undefined, '')).toBeCloseTo(pt(13.5), 5);
+        expect(await lineHeightOf('Calibri', 11, undefined, '')).toBeCloseTo(CALIBRI * pt(11), 5);
       });
 
       it('lays out a metric-compatible substitute like the original font', async () => {
-        expect(await lineHeightOf('Carlito', 11)).toBeCloseTo(pt(13.5), 5);
+        expect(await lineHeightOf('Carlito', 11)).toBeCloseTo(CALIBRI * pt(11), 5);
       });
     });
 
@@ -1474,8 +1481,8 @@ describe('measureBlock', () => {
       expect(measure.lines[0].ascent).toBeLessThan(20 * 1.2); // Reasonable for 20px font
       expect(measure.lines[0].descent).toBeGreaterThan(0);
       expect(measure.lines[0].descent).toBeLessThan(20 * 0.5);
-      // Arial single: 1.1499 × 20px, rounded up to 0.1px
-      expect(measure.lines[0].lineHeight).toBeCloseTo(23, 5);
+      // Arial single: 1.1499 × 20px
+      expect(measure.lines[0].lineHeight).toBeCloseTo(1.1499 * 20, 5);
     });
 
     it('uses the largest fontSize in a line for metrics', async () => {

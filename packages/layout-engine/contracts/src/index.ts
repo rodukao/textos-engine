@@ -1869,6 +1869,11 @@ export type ParagraphAttrs = {
   tabIntervalTwips?: number;
   keepNext?: boolean;
   keepLines?: boolean;
+  /**
+   * w:widowControl: keep a paragraph's first and last lines from standing alone at a page break.
+   * Importers set it on when the document leaves it out, as Word does (only w:val="0" turns it off).
+   */
+  widowControl?: boolean;
   pageBreakBefore?: boolean;
   trackedChangesMode?: TrackedChangesMode;
   trackedChangesEnabled?: boolean;

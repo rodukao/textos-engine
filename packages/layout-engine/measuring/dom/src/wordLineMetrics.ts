@@ -7,10 +7,12 @@
  * hhea.descender))). The result depends on the font: Calibri is 1.2207 × size, Cambria 1.1724,
  * Times New Roman and Arial 1.1499, Segoe UI 1.3301.
  *
- * "Multiple" spacing (lineRule="auto") multiplies that single height, and Word rounds every line
- * height up to 1/960 inch (0.075 pt = 0.1 px). Both rules were measured against Word 16 for 7 fonts,
- * 4 sizes and 4 spacings (112 cases, all exact), plus empty paragraphs, multiples below 1 and
- * "at least" spacing.
+ * "Multiple" spacing (lineRule="auto") multiplies that single height. Checked against Word 16 for 7
+ * fonts, 4 sizes and 4 spacings, plus empty paragraphs, multiples below 1 and "at least" spacing.
+ * On screen Word rounds each line up to 1/960 inch, but when it prints or saves as PDF it lays lines
+ * out at the exact height (line positions in its PDFs step 14.52/14.40 pt for an exact 14.49 pt), and
+ * page breaks follow that, so the layout uses the exact height. The bench tools in the Textos
+ * repository (metricas-fonte.mjs, altura-linha-word.ps1) reproduce these measurements.
  *
  * The ratios below are keyed by the font named in the document (not the font the browser ends up
  * rendering), so the layout follows Word even when a metric-compatible substitute is used.
@@ -88,12 +90,6 @@ const METRIC_COMPATIBLE_ALIASES: Record<string, string> = {
 /** Fallback when the font is unknown and the browser cannot report font metrics. */
 export const DEFAULT_SINGLE_LINE_RATIO = 1.15;
 
-/** Word rounds line heights up to 1/960 inch: 0.1 px at 96 px per inch. */
-const WORD_LINE_HEIGHT_QUANTUM_PX = 0.1;
-
-/** Values this close above a quantum step are float noise in Word's own arithmetic, not a new step. */
-const QUANTUM_TOLERANCE = 0.025;
-
 /** First family of a CSS font-family list, unquoted and lowercased. */
 const primaryFamily = (fontFamily: string): string => {
   const first = fontFamily.split(',')[0] ?? '';
@@ -118,11 +114,4 @@ export function getWordSingleLineRatio(fontFamily: string | undefined): number |
   const ratio = WORD_SINGLE_LINE_RATIOS[METRIC_COMPATIBLE_ALIASES[family] ?? family];
   if (ratioByFontFamily.size < 500) ratioByFontFamily.set(fontFamily, ratio);
   return ratio;
-}
-
-/** Rounds a line height up to Word's 1/960 inch grid. */
-export function quantizeWordLineHeight(px: number): number {
-  if (!Number.isFinite(px) || px <= 0) return px;
-  const steps = Math.ceil(px / WORD_LINE_HEIGHT_QUANTUM_PX - QUANTUM_TOLERANCE);
-  return Math.round(steps * WORD_LINE_HEIGHT_QUANTUM_PX * 1000) / 1000;
 }

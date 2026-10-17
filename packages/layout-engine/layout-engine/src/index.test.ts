@@ -175,6 +175,57 @@ describe('layoutDocument', () => {
     expect(secondFragment.y).toBe(options.margins?.top);
   });
 
+  describe('widow/orphan control (w:widowControl)', () => {
+    // Page content height 180: six 30px lines fit.
+    const options: LayoutOptions = {
+      pageSize: { w: 400, h: 240 },
+      margins: { top: 30, right: 30, bottom: 30, left: 30 },
+    };
+    const paragraph = (id: string, widowControl?: boolean): FlowBlock => ({
+      kind: 'paragraph',
+      id,
+      runs: [],
+      ...(widowControl === undefined ? {} : { attrs: { widowControl } }),
+    });
+    const linesOf = (layout: ReturnType<typeof layoutDocument>, id: string) =>
+      layout.pages.map((page) =>
+        page.fragments
+          .filter((fragment) => fragment.blockId === id && fragment.kind === 'para')
+          .map(
+            (fragment) =>
+              (fragment as { toLine: number; fromLine: number }).toLine - (fragment as { fromLine: number }).fromLine,
+          ),
+      );
+
+    it('takes one more line to the next page instead of leaving the last line alone there', () => {
+      const layout = layoutDocument(
+        [paragraph('filler'), paragraph('p', true)],
+        [makeMeasure([30, 30]), makeMeasure([30, 30, 30, 30, 30])],
+        options,
+      );
+      // Without widow control: 4 lines + 1 alone on page 2. With it: 3 + 2.
+      expect(linesOf(layout, 'p')).toEqual([[3], [2]]);
+    });
+
+    it('moves the whole paragraph when only its first line would fit', () => {
+      const layout = layoutDocument(
+        [paragraph('filler'), paragraph('p', true)],
+        [makeMeasure([30, 30, 30, 30, 30]), makeMeasure([30, 30, 30])],
+        options,
+      );
+      expect(linesOf(layout, 'p')).toEqual([[], [3]]);
+    });
+
+    it('splits freely when the paragraph turns it off', () => {
+      const layout = layoutDocument(
+        [paragraph('filler'), paragraph('p', false)],
+        [makeMeasure([30, 30]), makeMeasure([30, 30, 30, 30, 30])],
+        options,
+      );
+      expect(linesOf(layout, 'p')).toEqual([[4], [1]]);
+    });
+  });
+
   it('flows multiple blocks sequentially and creates additional pages as needed', () => {
     const blocks: FlowBlock[] = [
       { kind: 'paragraph', id: 'block-1', runs: [] },

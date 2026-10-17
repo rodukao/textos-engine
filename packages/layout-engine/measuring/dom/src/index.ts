@@ -84,7 +84,7 @@ import { DEFAULT_FONT_MEASURE_CONTEXT, type FaceKey, type FontMeasureContext } f
 export { installNodeCanvasPolyfill } from './setup.js';
 import { clearMeasurementCache, getMeasuredTextWidth, setCacheSize } from './measurementCache.js';
 import { getFontMetrics, clearFontMetricsCache, type FontInfo } from './fontMetricsCache.js';
-import { DEFAULT_SINGLE_LINE_RATIO, getWordSingleLineRatio, quantizeWordLineHeight } from './wordLineMetrics.js';
+import { DEFAULT_SINGLE_LINE_RATIO, getWordSingleLineRatio } from './wordLineMetrics.js';
 import { computeAutoFitColumnWidths } from './autofit-columns.js';
 import { buildAutoFitWorkingGridInput, type WorkingTableGridInput } from './autofit-normalize.js';
 import { computeFixedTableColumnWidths } from './fixed-table-columns.js';
@@ -3852,8 +3852,7 @@ export function resolveWordLineHeight(
  *   1 shrink the line, as in Word
  * - atLeast: `line` in px, but never below the single height
  * - exact: `line` in px
- *
- * auto and atLeast heights are rounded up to Word's 1/960 inch grid.
+
  */
 const resolveLineHeight = (
   spacing: ParagraphSpacing | undefined,
@@ -3862,12 +3861,12 @@ const resolveLineHeight = (
 ): number => {
   const line = spacing?.line;
   const lineRule = spacing?.lineRule ?? 'auto';
-  if (line == null) return quantizeWordLineHeight(single);
+  if (line == null) return single;
   if (spacing?.lineUnit === 'multiplier') {
-    return quantizeWordLineHeight(line * single);
+    return line * single;
   }
   if (lineRule === 'exact') return line;
-  return quantizeWordLineHeight(Math.max(line, single));
+  return Math.max(line, single);
 };
 
 const sanitizePositive = (value: number | undefined): number =>

@@ -910,6 +910,8 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
   /** Page whose floats the lines were last wrapped around. */
   let bandedPageNumber = ensurePage().page.number;
   const firstPageNumber = bandedPageNumber;
+  /** A widow-control slice left room on the page: its remaining lines start on the next one. */
+  let breakAfterWidowSlice = false;
   let lastFragmentY: number | undefined;
 
   if (typeof remeasureParagraph === 'function') {
@@ -1029,6 +1031,7 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
      */
 
     const keepLines = attrs?.keepLines === true;
+    const widowControl = attrs?.widowControl === true;
     if (keepLines && fromLine === 0) {
       const neededSpacingBefore = collapseSpacingBefore(spacingBefore, state.trailingSpacing);
       const pageContentHeight = state.contentBottom - state.topMargin;
@@ -1272,6 +1275,11 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
       effectiveBottom = computePreviewBottom();
     }
 
+    if (breakAfterWidowSlice) {
+      breakAfterWidowSlice = false;
+      state = advanceColumn(state);
+      effectiveBottom = computePreviewBottom();
+    }
     const breakBeforeLine = breakBeforeAnchorOf ? anchorLineIndex(block, lines, breakBeforeAnchorOf.block) : undefined;
     if (
       breakBeforeLine != null &&
@@ -1349,6 +1357,8 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
     let height = 0;
     let sliceDemand = 0;
     let sliceRefs = 0;
+    /** The slice stopped because the next line does not fit on this page/column. */
+    let reachedPageEnd = false;
     while (toLine < lines.length) {
       const lineHeight = lines[toLine].lineHeight || 0;
       const range = computeFragmentPmRange(block, lines, fromLine, toLine + 1);
@@ -1376,11 +1386,38 @@ export function layoutParagraphBlock(ctx: ParagraphLayoutContext, anchors?: Para
       if (toLine === breakBeforeLine && state.page.number === firstPageNumber) break;
       const candidateBottom = state.cursorY + height + lineHeight + borderVertical;
       const effBot = computeEffectiveBottom(orderedDemand, nextRefs);
-      if (candidateBottom > effBot) break;
+      if (candidateBottom > effBot) {
+        reachedPageEnd = true;
+        break;
+      }
       height += lineHeight;
       sliceDemand = orderedDemand;
       sliceRefs = nextRefs;
       toLine += 1;
+    }
+
+    /**
+     * Widow/orphan control (w:widowControl; importers turn it on by default, as Word): the last line never
+     * goes alone to the next page (one more line goes with it), and the first line never stays alone
+     * at the bottom of a page (the paragraph moves to the next page).
+     */
+    if (widowControl && reachedPageEnd && toLine < lines.length) {
+      if (lines.length - toLine === 1 && toLine - fromLine >= 2) {
+        toLine -= 1;
+        breakAfterWidowSlice = true;
+        height -= lines[toLine].lineHeight || 0;
+        const range = computeFragmentPmRange(block, lines, fromLine, toLine);
+        sliceDemand = computeFootnoteClusterDemand(range.pmStart ?? 0, range.pmEnd ?? 0);
+        sliceRefs = ctx.getFootnoteRefCountForBlockId
+          ? ctx.getFootnoteRefCountForBlockId(block.id, range.pmStart, range.pmEnd)
+          : 0;
+      }
+      if (fromLine === 0 && toLine - fromLine < 2 && state.page.fragments.length > 0) {
+        state = advanceColumn(state);
+        spacingBefore = baseSpacingBefore;
+        appliedSpacingBefore = spacingBefore === 0;
+        continue;
+      }
     }
 
     const slice = { toLine, height };
