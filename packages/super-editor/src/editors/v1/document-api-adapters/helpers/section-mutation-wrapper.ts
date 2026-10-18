@@ -6,13 +6,8 @@ import { checkRevision } from '../plan-engine/revision-tracker.js';
 import { clearIndexCache } from './index-cache.js';
 import { rejectTrackedMode } from './mutation-helpers.js';
 import { resolveSectionProjections, getBodySectPrFromEditor, type SectionProjection } from './sections-resolver.js';
-import {
-  ensureSectPrElement,
-  cloneXmlElement,
-  readSectPrMargins,
-  readSectPrPageSetup,
-  type XmlElement,
-} from './sections-xml.js';
+import { ensureSectPrElement, readSectPrMargins, type XmlElement } from './sections-xml.js';
+import { syncConverterBodySectPr, type ConverterWithBodySection } from './body-section-sync.js';
 import { readTargetSectPr } from './section-projection-access.js';
 
 function toSectionFailure(
@@ -39,36 +34,7 @@ function buildSectionMarginsForAttrs(sectPr: XmlElement): Record<string, number 
 }
 
 function syncConverterBodySection(editor: Editor, sectPr: XmlElement): void {
-  const converter = getConverter(editor);
-  if (!converter) return;
-  converter.bodySectPr = cloneXmlElement(sectPr);
-
-  const savedBodyNode = converter.savedTagsToRestore?.find(
-    (entry: Record<string, unknown>) => entry?.name === 'w:body',
-  );
-  if (savedBodyNode && Array.isArray(savedBodyNode.elements)) {
-    const preservedChildren = savedBodyNode.elements.filter(
-      (entry: Record<string, unknown>) => entry?.name !== 'w:sectPr',
-    );
-    preservedChildren.push(cloneXmlElement(sectPr) as unknown as Record<string, unknown>);
-    savedBodyNode.elements = preservedChildren;
-  }
-
-  const margins = readSectPrMargins(sectPr);
-  const pageSetup = readSectPrPageSetup(sectPr);
-  if (!converter.pageStyles) converter.pageStyles = {};
-  if (!converter.pageStyles.pageSize) converter.pageStyles.pageSize = {};
-  if (pageSetup?.width !== undefined) converter.pageStyles.pageSize.width = pageSetup.width;
-  if (pageSetup?.height !== undefined) converter.pageStyles.pageSize.height = pageSetup.height;
-  if (!converter.pageStyles.pageMargins) converter.pageStyles.pageMargins = {};
-  const pageMargins = converter.pageStyles.pageMargins;
-  if (margins.top !== undefined) pageMargins.top = margins.top;
-  if (margins.right !== undefined) pageMargins.right = margins.right;
-  if (margins.bottom !== undefined) pageMargins.bottom = margins.bottom;
-  if (margins.left !== undefined) pageMargins.left = margins.left;
-  if (margins.header !== undefined) pageMargins.header = margins.header;
-  if (margins.footer !== undefined) pageMargins.footer = margins.footer;
-  if (margins.gutter !== undefined) pageMargins.gutter = margins.gutter;
+  syncConverterBodySectPr(getConverter(editor) as ConverterWithBodySection | undefined, sectPr);
 }
 
 interface ConverterLike {

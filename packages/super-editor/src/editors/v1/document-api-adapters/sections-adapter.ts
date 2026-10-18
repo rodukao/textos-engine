@@ -59,11 +59,9 @@ import {
 } from './helpers/header-footer-refs-mutation.js';
 import {
   clearSectPrPageBorders,
-  cloneXmlElement,
   createSectPrElement,
   ensureSectPrElement,
   readSectPrMargins,
-  readSectPrPageSetup,
   writeSectPrBreakType,
   writeSectPrColumns,
   writeSectPrDirection,
@@ -77,6 +75,7 @@ import {
   writeSectPrVerticalAlign,
   type XmlElement,
 } from './helpers/sections-xml.js';
+import { syncConverterBodySectPr, type ConverterWithBodySection } from './helpers/body-section-sync.js';
 
 interface ConverterWithSections extends ConverterWithDocumentSettings, ConverterWithHeaderFooterParts {
   bodySectPr?: unknown;
@@ -195,32 +194,7 @@ function buildSectionMarginsForAttrs(sectPr: XmlElement): Record<string, number 
 }
 
 function syncConverterBodySection(editor: Editor, sectPr: XmlElement): void {
-  const converter = getConverter(editor);
-  if (!converter) return;
-  converter.bodySectPr = cloneXmlElement(sectPr);
-
-  const savedBodyNode = converter.savedTagsToRestore?.find((entry) => entry?.name === 'w:body');
-  if (savedBodyNode && Array.isArray(savedBodyNode.elements)) {
-    const preservedChildren = savedBodyNode.elements.filter((entry) => entry?.name !== 'w:sectPr');
-    preservedChildren.push(cloneXmlElement(sectPr) as unknown as { name?: string; [key: string]: unknown });
-    savedBodyNode.elements = preservedChildren;
-  }
-
-  const margins = readSectPrMargins(sectPr);
-  const pageSetup = readSectPrPageSetup(sectPr);
-  if (!converter.pageStyles) converter.pageStyles = {};
-  if (!converter.pageStyles.pageSize) converter.pageStyles.pageSize = {};
-  if (pageSetup?.width !== undefined) converter.pageStyles.pageSize.width = pageSetup.width;
-  if (pageSetup?.height !== undefined) converter.pageStyles.pageSize.height = pageSetup.height;
-  if (!converter.pageStyles.pageMargins) converter.pageStyles.pageMargins = {};
-  const pageMargins = converter.pageStyles.pageMargins;
-  if (margins.top !== undefined) pageMargins.top = margins.top;
-  if (margins.right !== undefined) pageMargins.right = margins.right;
-  if (margins.bottom !== undefined) pageMargins.bottom = margins.bottom;
-  if (margins.left !== undefined) pageMargins.left = margins.left;
-  if (margins.header !== undefined) pageMargins.header = margins.header;
-  if (margins.footer !== undefined) pageMargins.footer = margins.footer;
-  if (margins.gutter !== undefined) pageMargins.gutter = margins.gutter;
+  syncConverterBodySectPr(getConverter(editor) as ConverterWithBodySection | undefined, sectPr);
 }
 
 function applySectPrToProjection(editor: Editor, projection: SectionProjection, sectPr: XmlElement): void {

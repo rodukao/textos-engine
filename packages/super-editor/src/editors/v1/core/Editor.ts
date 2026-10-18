@@ -105,6 +105,10 @@ import { readSettingsRoot, parseProtectionState } from '../document-api-adapters
 import { applyEffectiveEditability, getProtectionStorage } from '../extensions/protection/editability.js';
 import { getViewModeSelectionWithoutStructuredContent } from './helpers/getViewModeSelectionWithoutStructuredContent.js';
 import { resolveMainBodyEditor } from '../document-api-adapters/helpers/word-statistics.js';
+import {
+  resyncConverterBodySectPrFromDoc,
+  type ConverterWithBodySection,
+} from '../document-api-adapters/helpers/body-section-sync.js';
 import { commitLiveStorySessionRuntimes } from '../document-api-adapters/story-runtime/live-story-session-runtime-registry.js';
 import { buildFilteredMetadataXml } from '../document-api-adapters/plan-engine/anchored-metadata-wrappers.js';
 
@@ -3589,6 +3593,14 @@ export class Editor extends EventEmitter<EditorEventMap> {
     }
 
     const selectionHasChanged = !prevState.selection.eq(nextState.selection);
+
+    // History only tracks doc.attrs.bodySectPr; layout reads the converter copy.
+    // Undo/redo (or any step that rewrites the attribute) must carry it over.
+    resyncConverterBodySectPrFromDoc(
+      this.converter as unknown as ConverterWithBodySection | undefined,
+      prevState.doc.attrs?.bodySectPr,
+      nextState.doc.attrs?.bodySectPr,
+    );
 
     this._state = nextState;
     if (this.view) {

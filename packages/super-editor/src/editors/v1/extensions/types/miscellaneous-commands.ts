@@ -46,6 +46,8 @@ export type LinkedStyleNodeType = 'paragraph' | 'character' | string;
 
 /** Options for insertSectionBreakAtSelection */
 export type InsertSectionBreakOptions = {
+  /** How the new section starts (default 'nextPage', Word's "Next Page") */
+  breakType?: 'nextPage' | 'continuous' | 'evenPage' | 'oddPage';
   /** Distance from page top to content area in inches (must be >= 0) */
   headerInches?: number;
   /** Distance from page bottom to content area in inches (must be >= 0) */
@@ -239,6 +241,7 @@ export interface MiscellaneousCommands {
    * @param options - Optional margin values in inches
    * @example
    * editor.commands.insertSectionBreakAtSelection()
+   * editor.commands.insertSectionBreakAtSelection({ breakType: 'continuous' })
    * editor.commands.insertSectionBreakAtSelection({ headerInches: 0.5, footerInches: 0.5 })
    */
   insertSectionBreakAtSelection: (options?: InsertSectionBreakOptions) => boolean;
