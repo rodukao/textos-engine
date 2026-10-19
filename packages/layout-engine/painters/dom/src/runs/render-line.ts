@@ -428,8 +428,19 @@ export const renderLine = ({
     paragraphEndsWithLineBreak: false,
     skipJustifyOverride: skipJustify || hasMultipleExplicitPositionedSegments,
   });
+  // The last line of a justified paragraph is never stretched, but Word does squeeze its spaces
+  // when the measurer fitted it by compression (naturalWidth wider than the line), so the text
+  // stays inside the margin as in Word.
+  const alignment = (block as ParagraphBlock).attrs?.alignment;
+  const squeezeOnly =
+    !justifyShouldApply &&
+    (alignment === 'justify' || alignment === 'both') &&
+    line.naturalWidth != null &&
+    line.naturalWidth > availableWidth &&
+    !line.hasExplicitTabStops &&
+    !hasMultipleExplicitPositionedSegments;
 
-  if (justifyShouldApply) {
+  if (justifyShouldApply || squeezeOnly) {
     // The measurer trims wrap-point trailing spaces from line ranges, but slicing can still
     // produce whitespace-only runs at style boundaries. These runs are especially problematic
     // for justify because `word-spacing` behavior is inconsistent on pure-whitespace spans.
@@ -449,7 +460,7 @@ export const renderLine = ({
     lineWidth,
     availableWidth,
     spaceCount,
-    shouldJustify: justifyShouldApply,
+    shouldJustify: justifyShouldApply || squeezeOnly,
   });
   const lineContainsInlineImage = runsForLine.some((run) => isImageRun(run));
   const useSegmentPositioning = shouldUseSegmentPositioning(

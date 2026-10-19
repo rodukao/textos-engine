@@ -610,6 +610,48 @@ describe('DomPainter', () => {
     expect(lines[1].style.wordSpacing).toBe('');
   });
 
+  it("squeezes, but never stretches, a justified paragraph's last line fitted by compression (Word behavior)", () => {
+    const block: FlowBlock = {
+      kind: 'paragraph',
+      id: 'squeeze-block',
+      runs: [{ text: 'a b c', fontFamily: 'Arial', fontSize: 16 }],
+      attrs: { alignment: 'justify' },
+    };
+    const lineOf = (naturalWidth?: number) => ({
+      fromRun: 0,
+      fromChar: 0,
+      toRun: 0,
+      toChar: 5,
+      width: 100,
+      maxWidth: 100,
+      spaceCount: 2,
+      ...(naturalWidth != null ? { naturalWidth } : {}),
+      ascent: 12,
+      descent: 4,
+      lineHeight: 20,
+    });
+    const layout: Layout = {
+      pageSize: { w: 200, h: 200 },
+      pages: [
+        {
+          number: 1,
+          fragments: [{ kind: 'para', blockId: 'squeeze-block', fromLine: 0, toLine: 1, x: 0, y: 0, width: 100 }],
+        },
+      ],
+    };
+    const paintWith = (naturalWidth?: number) => {
+      const measure: Measure = { kind: 'paragraph', lines: [lineOf(naturalWidth)], totalHeight: 20 };
+      mount.innerHTML = '';
+      createTestPainter({ blocks: [block], measures: [measure] }).paint(layout, mount);
+      return (mount.querySelector('.superdoc-line') as HTMLElement).style.wordSpacing;
+    };
+
+    // Natural width 106 in a 100px line: the 2 spaces lose 3px each.
+    expect(paintWith(106)).toBe('-3px');
+    // A last line that fits as is keeps its natural spacing.
+    expect(paintWith()).toBe('');
+  });
+
   it('applies justify for manual tab runs that use default positioning', () => {
     const tabBlock: FlowBlock = {
       kind: 'paragraph',

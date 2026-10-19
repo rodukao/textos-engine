@@ -231,6 +231,14 @@ const ALLOWED_TAB_VALS = new Set<TabStop['val']>(['start', 'center', 'end', 'dec
 // remeasure path and this full measurer stay in lockstep.
 const DEFAULT_PARAGRAPH_FONT_SIZE = 12;
 const DEFAULT_PARAGRAPH_FONT_FAMILY = 'Arial';
+
+// Line break opportunities between runs (see splitGluedTail). Ideographic scripts break between
+// any two characters, so text in them never glues across a run boundary.
+const IDEOGRAPHIC = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}';
+/** A line may break right after this character. */
+const BREAK_AFTER_CHAR = new RegExp(`[\\s\\-\\u2013\\u2014${IDEOGRAPHIC}]`, 'u');
+/** A line may break right before this character. */
+const BREAK_AROUND_CHAR = new RegExp(`[\\s${IDEOGRAPHIC}]`, 'u');
 const isValidFontSize = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0;
 
@@ -1527,6 +1535,106 @@ async function measureParagraphBlock(
     }
   };
 
+  /**
+   * Word never breaks a line where two runs touch without a space: in `"curadores" + "."` the text
+   * across both runs is one word, so the period cannot start a line on its own. When the first word
+   * of a run that starts glued to the line does not fit, this truncates `line` at its last break
+   * opportunity (after a space or a hyphen) and returns what followed it, to be carried to the next
+   * line together with the word. Returns null — so the caller keeps breaking at the run boundary —
+   * when the line ends in a break opportunity, has none, or holds tab-positioned or non-text content
+   * in the part that would move.
+   */
+  const splitGluedTail = (
+    lineToSplit: NonNullable<typeof currentLine>,
+    nextWord: string,
+  ): {
+    segments: NonNullable<NonNullable<typeof currentLine>['segments']>;
+    width: number;
+    fromRun: number;
+    fromChar: number;
+    maxFontSize: number;
+    maxFontInfo: NonNullable<typeof currentLine>['maxFontInfo'];
+  } | null => {
+    const segments = lineToSplit.segments;
+    if (!segments?.length || !nextWord || BREAK_AROUND_CHAR.test(nextWord[0])) return null;
+
+    const textOf = (segment: (typeof segments)[number]): string | null => {
+      const run = runsToProcess[segment.runIndex];
+      if (!run || !('text' in run) || typeof run.text !== 'string') return null;
+      return run.text.slice(segment.fromChar, segment.toChar);
+    };
+
+    const lastText = textOf(segments[segments.length - 1]);
+    if (!lastText || BREAK_AFTER_CHAR.test(lastText[lastText.length - 1])) return null;
+
+    // Walk back to the last break opportunity on the line.
+    let breakSegment = -1;
+    let breakChar = -1;
+    for (let i = segments.length - 1; i >= 0 && breakSegment < 0; i -= 1) {
+      const segment = segments[i];
+      const text = textOf(segment);
+      if (text == null || segment.x !== undefined) return null;
+      for (let k = text.length - 1; k >= 0; k -= 1) {
+        if (BREAK_AFTER_CHAR.test(text[k])) {
+          breakSegment = i;
+          breakChar = segment.fromChar + k + 1;
+          break;
+        }
+      }
+    }
+    if (breakSegment < 0) return null;
+
+    const measurePart = (runIndex: number, from: number, to: number): number => {
+      const run = runsToProcess[runIndex] as TextRun;
+      const { font } = buildFontString(
+        run as { fontFamily: string; fontSize: number; bold?: boolean; italic?: boolean },
+        fontContext,
+      );
+      return measureRunWidth(run.text.slice(from, to), font, ctx, run, from);
+    };
+
+    const splitAt = segments[breakSegment];
+    const carried: typeof segments = [];
+    let removedWidth = 0;
+    // Width of the part of the split segment that stays on this line.
+    let keptPartWidth = splitAt.width;
+    if (breakChar < splitAt.toChar) {
+      const carriedWidth = measurePart(splitAt.runIndex, breakChar, splitAt.toChar);
+      keptPartWidth = breakChar > splitAt.fromChar ? measurePart(splitAt.runIndex, splitAt.fromChar, breakChar) : 0;
+      carried.push({ runIndex: splitAt.runIndex, fromChar: breakChar, toChar: splitAt.toChar, width: carriedWidth });
+      removedWidth += splitAt.width - keptPartWidth;
+    }
+    for (const segment of segments.slice(breakSegment + 1)) {
+      carried.push({
+        runIndex: segment.runIndex,
+        fromChar: segment.fromChar,
+        toChar: segment.toChar,
+        width: segment.width,
+      });
+      removedWidth += segment.width;
+    }
+    // Nothing would stay on this line but spaces: let the word break at the run instead.
+    const kept = segments.slice(0, breakSegment);
+    const keptText = kept.map(textOf).join('') + (textOf(splitAt) ?? '').slice(0, breakChar - splitAt.fromChar);
+    if (carried.length === 0 || keptText.trim().length === 0) return null;
+
+    if (breakChar > splitAt.fromChar) kept.push({ ...splitAt, toChar: breakChar, width: keptPartWidth });
+    lineToSplit.segments = kept;
+    lineToSplit.toRun = splitAt.runIndex;
+    lineToSplit.toChar = breakChar;
+    lineToSplit.width = roundValue(Math.max(0, lineToSplit.width - removedWidth));
+
+    const carriedRuns = carried.map((segment) => runsToProcess[segment.runIndex] as TextRun);
+    return {
+      segments: carried,
+      width: roundValue(carried.reduce((sum, segment) => sum + segment.width, 0)),
+      fromRun: carried[0].runIndex,
+      fromChar: carried[0].fromChar,
+      maxFontSize: Math.max(...carriedRuns.map((run) => lineHeightFontSize(run))),
+      maxFontInfo: getFontInfoFromRun(carriedRuns[carriedRuns.length - 1], fontContext),
+    };
+  };
+
   // Per-line-segment tab counts. The heuristic below binds the last N tabs of a
   // segment to the last N alignment stops; segments are delimited by explicit
   // <w:br/> runs because pPr/tabs apply per line, not per paragraph.
@@ -2686,25 +2794,24 @@ async function measureParagraphBlock(
           !isTocEntry;
         let compressedWidth: number | null = null;
 
-        // Justify-aware fit: allow minor per-space compression (non-last paragraph line) to keep the word.
+        // Justify-aware fit: allow minor per-space compression to keep the word. Word squeezes the
+        // spaces of a justified paragraph by up to ~25% to fit a word, on its last line too (that
+        // line is never stretched, but it is squeezed): measured in Word 16 with Cambria 11 pt, a
+        // 13-space line fits in 8 pt less than its natural width, justified, and not at all when
+        // left-aligned. The painter squeezes the last line to match (see render-line).
         if (shouldBreak && justifyAlignment) {
-          const isLastNonEmptyWordInSegment = wordIndex === lastNonEmptyWordIndex;
-          const isParagraphLastWord =
-            isLastSegment && isLastNonEmptyWordInSegment && runIndex === runsToProcess.length - 1;
-          if (!isParagraphLastWord) {
-            const existingSpaces = currentLine.spaceCount ?? 0;
-            const candidateSpaces = existingSpaces + (shouldIncludeDelimiterSpace ? 1 : 0);
-            if (candidateSpaces > 0) {
-              const overflow = totalWidthWithWord - availableWidth;
-              if (overflow > 0) {
-                const baseSpaceWidth =
-                  spaceWidth || measureRunWidth(' ', font, ctx, run, wordEndNoSpace) || Math.max(1, boundarySpacing);
-                const perSpaceCompression = overflow / candidateSpaces;
-                const maxPerSpaceCompression = baseSpaceWidth * 0.25; // ~25% squeeze permitted
-                if (perSpaceCompression <= maxPerSpaceCompression) {
-                  shouldBreak = false;
-                  compressedWidth = availableWidth;
-                }
+          const existingSpaces = currentLine.spaceCount ?? 0;
+          const candidateSpaces = existingSpaces + (shouldIncludeDelimiterSpace ? 1 : 0);
+          if (candidateSpaces > 0) {
+            const overflow = totalWidthWithWord - availableWidth;
+            if (overflow > 0) {
+              const baseSpaceWidth =
+                spaceWidth || measureRunWidth(' ', font, ctx, run, wordEndNoSpace) || Math.max(1, boundarySpacing);
+              const perSpaceCompression = overflow / candidateSpaces;
+              const maxPerSpaceCompression = baseSpaceWidth * 0.25; // ~25% squeeze permitted
+              if (perSpaceCompression <= maxPerSpaceCompression) {
+                shouldBreak = false;
+                compressedWidth = availableWidth;
               }
             }
           }
@@ -2714,6 +2821,9 @@ async function measureParagraphBlock(
           if (wordIndex === 0 && hasPendingSegmentTabGeometry) {
             clearWrapState();
           }
+          // A run that starts glued to the line (no space between them) continues its last word:
+          // break before that whole word, as Word does, not at the run boundary.
+          const gluedTail = isRunStart && !inActiveTabGroup ? splitGluedTail(currentLine, word) : null;
           trimTrailingWrapSpaces(currentLine);
           const metrics = finalizeLineMetrics(currentLine, spacing);
           const lineBase = currentLine;
@@ -2727,17 +2837,18 @@ async function measureParagraphBlock(
           pendingTabAlignment = null;
           pendingLeader = null;
 
+          const wordSegment = { runIndex, fromChar: wordStartChar, toChar: wordEndNoSpace, width: wordOnlyWidth };
           // Body line, so use bodyContentWidth for hanging indent
           currentLine = {
-            fromRun: runIndex,
-            fromChar: wordStartChar,
+            fromRun: gluedTail?.fromRun ?? runIndex,
+            fromChar: gluedTail?.fromChar ?? wordStartChar,
             toRun: runIndex,
             toChar: wordEndNoSpace,
-            width: wordOnlyWidth,
-            maxFontSize: lineHeightFontSize(run),
+            width: roundValue((gluedTail?.width ?? 0) + wordOnlyWidth),
+            maxFontSize: Math.max(gluedTail?.maxFontSize ?? 0, lineHeightFontSize(run)),
             maxFontInfo: getFontInfoFromRun(run, fontContext),
             maxWidth: getEffectiveWidth(bodyContentWidth),
-            segments: [{ runIndex, fromChar: wordStartChar, toChar: wordEndNoSpace, width: wordOnlyWidth }],
+            segments: [...(gluedTail?.segments ?? []), wordSegment],
             spaceCount: 0,
           };
           // If trailing space would fit on the new line, consume it here; otherwise skip it
@@ -2749,10 +2860,8 @@ async function measureParagraphBlock(
             // Fix: Also update the segment to include the trailing space character.
             // Without this, the segment excludes the space even though the line includes it,
             // causing the space to not be rendered.
-            if (currentLine.segments?.[0]) {
-              currentLine.segments[0].toChar = wordEndWithSpace;
-              currentLine.segments[0].width += spaceWidth;
-            }
+            wordSegment.toChar = wordEndWithSpace;
+            wordSegment.width += spaceWidth;
           } else {
             // Skip the space in character indexing even if we don't render it
             charPosInRun = wordEndWithSpace;

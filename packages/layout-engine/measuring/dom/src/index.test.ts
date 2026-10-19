@@ -1371,6 +1371,77 @@ describe('measureBlock', () => {
       expect(measure.lines[1].fromChar).toBe('Drugs classified as high-'.length);
     });
 
+    describe('squeezing spaces to fit a word, as Word', () => {
+      const text = 'observam os curadores do museu e da cidade';
+      const run = { text, fontFamily: 'Arial', fontSize: 16 };
+      const measureWith = async (alignment: 'justify' | 'left', maxWidth: number) =>
+        expectParagraphMeasure(
+          await measureBlock({ kind: 'paragraph', id: alignment, runs: [run], attrs: { alignment } }, maxWidth),
+        );
+
+      const widthOf = async (value: string) =>
+        expectParagraphMeasure(
+          await measureBlock({ kind: 'paragraph', id: 'w', runs: [{ ...run, text: value }] }, 2000),
+        ).lines[0].width;
+
+      it("squeezes a justified paragraph's last line instead of breaking it", async () => {
+        const natural = (await measureWith('left', 2000)).lines[0].width;
+        const space = (await widthOf('a b')) - (await widthOf('ab'));
+        // 7 spaces; overflow of ~15% of a space each, within Word's ~25%.
+        const maxWidth = natural - 7 * space * 0.15;
+        const justified = await measureWith('justify', maxWidth);
+        expect(justified.lines).toHaveLength(1);
+        expect(justified.lines[0].width).toBeLessThanOrEqual(maxWidth);
+        expect(justified.lines[0].naturalWidth).toBeCloseTo(natural, 0);
+        // Left-aligned text is never squeezed.
+        expect((await measureWith('left', maxWidth)).lines).toHaveLength(2);
+      });
+    });
+
+    describe('runs that touch without a space (one word across runs, as Word)', () => {
+      const runOf = (text: string) => ({ text, fontFamily: 'Arial', fontSize: 16 });
+      const widthOf = async (text: string) =>
+        expectParagraphMeasure(await measureBlock({ kind: 'paragraph', id: 'w', runs: [runOf(text)] }, 2000)).lines[0]
+          .width;
+
+      it('never starts a line with punctuation from the next run: the whole word moves down', async () => {
+        // Room for 'observam os curadores' but not for the period that follows it in its own run.
+        const maxWidth = (await widthOf('observam os curadores')) + 1;
+        const measure = expectParagraphMeasure(
+          await measureBlock(
+            { kind: 'paragraph', id: 'p', runs: [runOf('observam os curadores'), runOf('.')] },
+            maxWidth,
+          ),
+        );
+        expect(measure.lines).toHaveLength(2);
+        // Line 1 ends before 'curadores'; line 2 is 'curadores' + '.' across both runs.
+        expect(measure.lines[0]).toMatchObject({ fromRun: 0, toRun: 0, toChar: 'observam os '.length });
+        expect(measure.lines[1]).toMatchObject({ fromRun: 0, fromChar: 'observam os '.length, toRun: 1, toChar: 1 });
+        expect(measure.lines[1].width).toBeCloseTo(await widthOf('curadores.'), 0);
+      });
+
+      it('still breaks at the run boundary when the line ends with a space', async () => {
+        const maxWidth = (await widthOf('observam os ')) + 1;
+        const measure = expectParagraphMeasure(
+          await measureBlock(
+            { kind: 'paragraph', id: 's', runs: [runOf('observam os '), runOf('curadores')] },
+            maxWidth,
+          ),
+        );
+        expect(measure.lines[0]).toMatchObject({ toRun: 0 });
+        expect(measure.lines[1]).toMatchObject({ fromRun: 1, fromChar: 0 });
+      });
+
+      it('falls back to breaking at the run when the glued word is the only thing on the line', async () => {
+        const maxWidth = (await widthOf('curadores')) + 1;
+        const measure = expectParagraphMeasure(
+          await measureBlock({ kind: 'paragraph', id: 'o', runs: [runOf('curadores'), runOf('.')] }, maxWidth),
+        );
+        expect(measure.lines).toHaveLength(2);
+        expect(measure.lines[1]).toMatchObject({ fromRun: 1, fromChar: 0 });
+      });
+    });
+
     describe('Word line height (measured against Word 16)', () => {
       const pt = (value: number) => (value * 96) / 72;
       const lineHeightOf = async (
